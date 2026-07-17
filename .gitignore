@@ -24,6 +24,7 @@ dist/
 
 # OS
 .DS_Store
+*.lnk
 
 # Reference dumps (regenerate locally, not part of the app)
 backend/backend.txt
