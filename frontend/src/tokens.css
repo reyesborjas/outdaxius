@@ -1,0 +1,99 @@
+/* frontend/src/tokens.css */
+/* ========================
+   🎨 Role Colors
+   ======================== */
+.text-role-admin   { color: #2C3E50; }
+.text-role-guide   { color: #F39C12; }
+.text-role-traveler{ color: #3498DB; }
+
+.bg-role-admin     { background-color: #2C3E50; }
+.bg-role-guide     { background-color: #F39C12; }
+.bg-role-traveler  { background-color: #3498DB; }
+
+/* ========================
+   🎨 State Colors
+   ======================== */
+.text-state-success { color: #1E8449; }
+.text-state-danger  { color: #E74C3C; }
+.text-state-neutral { color: #95A5A6; }
+
+.bg-state-success   { background-color: #1E8449; }
+.bg-state-danger    { background-color: #E74C3C; }
+.bg-state-neutral   { background-color: #95A5A6; }
+
+/* ========================
+   🎨 Surfaces
+   ======================== */
+.bg-surface-snow  { background-color: #FFFFFF; }
+.bg-surface-dark  { background-color: #1C1C1C; }
+.bg-surface-light { background-color: #F9FAFB; }
+
+/* ========================
+   🔠 Typography
+   ======================== */
+.text-h1 {
+  font-size: 2rem;
+  line-height: 2.5rem;
+  font-weight: 700;
+}
+.text-h2 {
+  font-size: 1.5rem;
+  line-height: 2rem;
+  font-weight: 600;
+}
+.text-h3 {
+  font-size: 1.25rem;
+  line-height: 1.75rem;
+  font-weight: 600;
+}
+.text-body {
+  font-size: 1rem;
+  line-height: 1.5rem;
+}
+.text-small {
+  font-size: 0.875rem;
+  line-height: 1.25rem;
+}
+
+/* ========================
+   📏 Spacing Tokens
+   ======================== */
+.p-card     { padding: 1.25rem; }
+.py-section { padding-top: 2rem; padding-bottom: 2rem; }
+.mb-section { margin-bottom: 2rem; }
+
+/* ========================
+   🖼️ Radius + Shadows
+   ======================== */
+.rounded-xl2 { border-radius: 1rem; }
+
+.shadow-card {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.05);
+}
+.shadow-modal {
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
+}
+html, body, #root { height: 100%; }
+body { margin:0;}
+
+.app-shell {
+  height: 100vh;              /* no leftover white strip */
+  display: grid;
+  grid-template-columns: 260px minmax(0, 1fr);
+  overflow: hidden;           /* isolate scrolling to children */
+}
+
+.app-sidebar {
+  background: #12171d;
+  color: #fff;
+  overflow-y: auto;           /* sidebar scrolls independently */
+}
+
+.app-main {
+  background: #f7f7f9;
+  overflow: auto;             /* page content scrolls here */
+  padding: 24px;
+}
+
+/* only neutralize min-vh inside the dashboard, not globally */
+.app-shell .min-vh-100 { min-height: auto !important; }

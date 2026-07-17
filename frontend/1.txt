@@ -1,0 +1,59 @@
+Yes. I read your zips. Here is the concrete gap list to ship an MVP.
+
+# Backend — missing or incomplete
+
+* Broken files with literal `...` that will not run:
+  `app/main.py`, `app/api/auth.py`, `app/api/activities.py`, `app/api/locations.py`, `app/api/booking.py`, `app/api/program_schedules.py`, `app/api/activity_schedules.py`, `app/api/users.py`, `app/models/user.py`, `app/models/activity.py`, `app/models/location.py`, `app/models/programs.py`, `outdaxius-schema.sql`, several `app/schemas/*`.
+* No migrations: no Alembic folder or versions. Need initial migration covering all current models and enums.
+* DB bootstrap: missing init script to enable `uuid-ossp` and apply schema; `outdaxius-schema.sql` is incomplete.
+* Auth hardening: unify hashing/JWT helpers (you have `app/utils.py`, `app/utils/security.py`, and `app/core/security.py` in conflict). Add token expiry config usage and consistent import points.
+* Auth features: no refresh tokens, no password reset, no email verification. At minimum add reset by email token.
+* Users API: verify and finish `/users/me` and `PATCH /users/me` implementations; ensure birth\_date parsing works; add validation.
+* Bookings: only basic POST; finish capacity checks, parent schedule linkage, and add list endpoints: organizer view, user history, status transitions (confirm/cancel).
+* Schedules: finalize create/list for program and activity schedules; ensure cascade and constraints enforced.
+* Programs/Activities: finish CRUD bodies, gallery normalization, and relations (`programactivities`) with uniqueness checks.
+* Locations: complete Nominatim resolve/search and consistent `lat/lon` validation; add “near me” and bbox filters if MVP requires search by map.
+* Pagination and filtering: add standard `limit/offset/sort/q` to list endpoints.
+* CORS setup incomplete in `app/main.py`; add full middleware init.
+* Health/metrics: healthcheck exists; missing structured logging and request IDs.
+* Tests: none present. Add minimal API tests for auth, bookings, schedules.
+
+# Frontend — missing or incomplete
+
+* Project scaffold: no `package.json`, no Vite config, no `index.html`, no `public/` assets. Cannot build or run.
+* Env handling: missing `.env.example` with `VITE_API`.
+* Router shell incomplete: `App.jsx` is truncated; add routes, 404 page, guards, and layout wiring.
+* AuthContext: file is truncated; complete login, rehydrate `/users/me`, logout, token storage, and error states.
+* Pages that reference APIs are partial: `Welcome.jsx`, `ViewActivityModal.jsx`, `ViewProgramModal.jsx`, CRUD pages, dashboard pages. Finish forms, data fetching, and submission wiring.
+* Booking UI: finalize participant prefill from `/users/me` and submission to `/api/bookings`; add success/error states.
+* Organizer dashboard: finish Programs/Activities CRUD pages, schedule management, simple booking inbox.
+* Assets and styles: ensure Leaflet CSS and Bootstrap are declared in dependencies; finalize `styles/role-theme.css`.
+* SEO: missing `<title>`, meta, `robots.txt`, `sitemap.xml`.
+
+# DevOps / Ops — missing
+
+* Dockerfiles for API and Web; docker-compose with Postgres; seed command.
+* CI/CD workflow (lint, test, build, migrate, deploy).
+* `.env.example` for backend (DATABASE\_URL, SECRET\_KEY, etc.).
+* Reverse proxy (Nginx) config and HTTPS termination.
+* Backups and minimal logging/error tracking hook.
+
+# Policy/Legal — missing
+
+* Privacy Policy, Terms of Service, cookie notice pages.
+
+# What’s already present (but needs finishing)
+
+* Core models: activities, programs, schedules, bookings, locations, users.
+* Routers exist for: `/auth`, `/users`, `/activities`, `/programs`, `/locations`, `/bookings`, `/program-schedules`, `/activity-schedules` (many handlers are truncated).
+* Frontend shells for: auth pages, CRUD pages, welcome sections, map components, booking modals, profile editor.
+
+Deliverables to unblock MVP:
+
+1. Replace all truncated files with complete code.
+2. Add migrations and DB bootstrap.
+3. Add frontend scaffold (`package.json`, Vite, index.html) and wire routes.
+4. Finish auth + `/users/me`, bookings flow end-to-end.
+5. Add Docker + `.env.example` and a one-command local run.
+
+If you want, I can generate the missing scaffolds and first migration now.

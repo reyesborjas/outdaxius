@@ -1,0 +1,78 @@
+﻿/* ========================
+   Typography tokens
+   ======================== */
+.text-h1 {
+  font-size: 2rem;      /* ~ Tailwind text-2xl */
+  font-weight: 700;     /* ~ font-bold */
+}
+
+.text-h2 {
+  font-size: 1.5rem;    /* ~ Tailwind text-xl */
+  font-weight: 600;     /* ~ font-semibold */
+}
+
+.text-h3 {
+  font-size: 1.25rem;   /* ~ Tailwind text-lg */
+  font-weight: 600;     /* ~ font-semibold */
+}
+
+.text-body {
+  font-size: 1rem;      /* ~ Tailwind text-base */
+}
+
+.text-small {
+  font-size: 0.875rem;  /* ~ Tailwind text-sm */
+}
+
+
+/* ========================
+   Spacing tokens
+   ======================== */
+.p-card {
+  padding: 1.5rem;      /* ~ Tailwind p-5 */
+}
+
+.py-section {
+  padding-top: 2rem;    /* ~ Tailwind py-8 */
+  padding-bottom: 2rem;
+}
+
+.mb-section {
+  margin-bottom: 2rem;  /* ~ Tailwind mb-8 */
+}
+
+
+/* ========================
+   Surfaces
+   ======================== */
+.bg-surface-snow {
+  background-color: #ffffff; /* ~ Tailwind bg-white */
+}
+
+.bg-surface-light {
+  background-color: #f9fafb; /* ~ Tailwind bg-gray-50 */
+}
+
+.bg-surface-dark {
+  background-color: #000000; /* ~ Tailwind bg-black */
+}
+
+
+/* ========================
+   Shadows
+   ======================== */
+.shadow-card {
+  box-shadow: 0 .5rem 1rem rgba(0, 0, 0, 0.15); /* Bootstrap .shadow */
+}
+
+.shadow-modal {
+  box-shadow: 0 1rem 3rem rgba(0, 0, 0, 0.175); /* Bootstrap .shadow-lg */
+}
+
+
+/* ========================
+   Radius
+   ======================== */
+.rounded-xl2 {
+  border-radius: 1rem; /* ~ Tailwind rounded-xl */
+}

@@ -1,0 +1,38 @@
+# Python virtual envs (including the stray venv rooted here)
+venv/
+Lib/
+Scripts/
+pyvenv.cfg
+__pycache__/
+*.pyc
+.mypy_cache/
+.pytest_cache/
+.coverage
+
+# Node / frontend
+node_modules/
+dist/
+.vite/
+
+# Env files (never commit secrets)
+.env
+.env.local
+.env.*.local
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+
+# Reference dumps (regenerate locally, not part of the app)
+backend/backend.txt
+frontend/frontend.txt
+backend/salida.txt
+
+# Not part of the web app being deployed here
+OutdaxiusApp/
+contex for prompts/
+entries.txt
+files.txt
+TDL MVP.docx

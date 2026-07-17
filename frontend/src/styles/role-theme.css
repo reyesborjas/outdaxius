@@ -1,0 +1,80 @@
+:root{
+  --admin:#2c3e50;      /* navy */
+  --guide:#f59e0b;      /* orange */
+  --user:#2da8ff;       /* blue */
+  --card-bg:#fff;
+  --card-br:#e5e7eb;
+  --shadow:0 6px 20px rgba(2,8,23,.08);
+}
+
+.role-cards{
+  display:grid;
+  grid-template-columns:repeat(3,minmax(0,1fr));
+  gap:18px;
+}
+
+.role-card{
+  background:var(--card-bg);
+  border:1px solid var(--card-br);
+  border-radius:12px;
+  padding:18px 20px;
+  box-shadow:var(--shadow);
+  transition:transform .15s ease, box-shadow .15s ease;
+}
+.role-card:hover{ transform:translateY(-2px); box-shadow:0 10px 28px rgba(2,8,23,.12); }
+
+.role-card h3{
+  margin:0 0 6px;
+  font-weight:800;
+  font-size:26px;
+  letter-spacing:.1px;
+}
+.role-card p{ margin:0 0 10px; color:#1f2937; }
+
+.role-card .bar{
+  height:6px;
+  border-radius:999px;
+  width:75%;
+  margin-top:6px;
+}
+
+.role-card--admin h3{ color:var(--admin); }
+.role-card--guide h3{ color:var(--guide); }
+.role-card--user  h3{ color:var(--user);  }
+
+.role-card--admin .bar{ background:var(--admin); }
+.role-card--guide .bar{ background:var(--guide); }
+.role-card--user  .bar{ background:var(--user);  }
+
+.role-card .cta{
+  margin-top:10px;
+  display:inline-block;
+  font-weight:600;
+  text-decoration:none;
+}
+.role-card--admin .cta{ color:var(--admin); }
+.role-card--guide .cta{ color:var(--guide); }
+.role-card--user  .cta{ color:var(--user);  }
+
+/* Shell layout básico */
+.app-shell{display:flex;min-height:100vh}
+.app-sidebar{width:280px;background:#fff;border-right:1px solid #e5e7eb}
+.app-main{flex:1;padding:24px}
+
+/* Colores por rol en Sidebar */
+.app-shell.role-admin .role-heading,
+.app-shell.role-admin .role-link{color:var(--admin)}
+.app-shell.role-admin .role-underline{height:6px;border-radius:999px;background:var(--admin);margin:6px 0 16px;width:75%}
+
+.app-shell.role-guide .role-heading,
+.app-shell.role-guide .role-link{color:var(--guide)}
+.app-shell.role-guide .role-underline{height:6px;border-radius:999px;background:var(--guide);margin:6px 0 16px;width:75%}
+
+.app-shell.role-user .role-heading,
+.app-shell.role-user .role-link{color:var(--user)}
+.app-shell.role-user .role-underline{height:6px;border-radius:999px;background:var(--user);margin:6px 0 16px;width:75%}
+
+/* Enlaces del sidebar */
+.app-sidebar .nav-link.role-link{font-weight:600}
+.app-sidebar .nav-link.role-link:hover{text-decoration:underline}
+
