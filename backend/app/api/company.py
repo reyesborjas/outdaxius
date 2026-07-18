@@ -3,7 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from typing import List
 from uuid import UUID
-from app.models.team import Team, Team
+from app.models.team import Team, TeamMember
 from app.db.session import get_db
 from app.models.company import Company
 from app.models.companymember import CompanyMember
@@ -23,7 +23,6 @@ from pydantic import BaseModel
 from datetime import datetime
 from typing import Optional
 from pydantic import ConfigDict
-from app.api.teams import Team, TeamMember
 
 from datetime import datetime, timezone
 from app.schemas.company_limits import CompanyLimitsResponse, LimitsOut, UsageOut, MonthlyUsageOut
@@ -330,26 +329,6 @@ def list_invitations(
     ).order_by(InvitationCode.created_at.desc()).all()
     
     return invitations
-
-@router.post("/invitations/accept", response_model=CompanyMemberOut)
-def accept_invitation(
-    data: InvitationAccept,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user)
-):
-    """Accept invitation to join company"""
-    
-    try:
-        member = InvitationManager.accept_invitation(
-            db=db,
-            code=data.code,
-            user_id=current_user.id
-        )
-        db.commit()
-        db.refresh(member)
-        return member
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
 
 # ============================================================================
 # MEMBERS MANAGEMENT
@@ -825,11 +804,6 @@ def remove_team_member(
     db.commit()
     
     return None
-
-@router.get("/{company_id}/teams", response_model=List[dict])
-def list_teams_for_company(company_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    teams = db.query(Team).filter_by(company_id=company_id).all()
-    return [{"id": str(team.id), "name": team.name, "company_id": str(team.company_id)} for team in teams]
 
 @router.get("/{company_id}/limits", response_model=CompanyLimitsResponse)
 def get_company_limits_and_usage(
