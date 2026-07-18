@@ -17,6 +17,7 @@ from app.schemas.invitation import (
     InvitationCreate, InvitationOut, InvitationAccept, InvitationListOut
 )
 from app.api.deps import get_current_user
+from app.core.permissions import check_company_admin, check_team_or_company_admin
 from app.services.licensing import LicenseManager
 from app.services.invitations import InvitationManager
 from pydantic import BaseModel
@@ -105,7 +106,7 @@ def get_company(
             "position": member.position,
             "is_admin": member.is_admin,
             "is_active": member.is_active,
-            "joinedat": member.joinedat,
+            "joined_at": member.joinedat,
             # Datos del usuario
             "user_display_name": user.display_name if user else None,
             "user_email": user.email if user else None,
@@ -370,7 +371,7 @@ def list_company_members(
             "position": member.position,
             "is_admin": member.is_admin,
             "is_active": member.is_active,
-            "joinedat": member.joinedat,
+            "joined_at": member.joinedat,
             "user_display_name": user.display_name if user else None,
             "user_email": user.email if user else None,
             "user_full_name": f"{user.first_name or ''} {user.last_name or ''}".strip() if user else None,
@@ -424,10 +425,6 @@ def remove_member(
     
     return None
 
-class TeamCreate(BaseModel):
-    name: str
-
-
 from pydantic import BaseModel, Field
 
 class TeamCreateRequest(BaseModel):
@@ -438,7 +435,7 @@ class TeamMemberAdd(BaseModel):
     user_id: UUID
 
 class TeamMemberRoleUpdate(BaseModel):
-    team_role: str
+    role_level: int = Field(..., ge=1, le=4)
 
 class TeamOut(BaseModel):
     id: UUID
@@ -448,14 +445,14 @@ class TeamOut(BaseModel):
     company_id: UUID
     created_at: datetime
     member_count: int = 0
-    
+
     model_config = ConfigDict(from_attributes=True)
 
 class TeamMemberOut(BaseModel):
     id: UUID
     team_id: UUID
     user_id: UUID
-    team_role: str
+    role_level: int
     joined_at: datetime
     user_email: Optional[str] = None
     user_name: Optional[str] = None
@@ -472,31 +469,31 @@ def create_team(
     current_user: User = Depends(get_current_user)
 ):
     """
-    Create a new team within a company.
-    Only company admins can create teams.
-    Creator is automatically added as team admin.
+    Create a new team within a company. Commercial authority (company_members.is_admin) governs
+    this, not operational role_level -- creating a team is a business decision, not a guide task.
+    Creator is automatically added as the team's master guide (role_level 1).
     """
-    
+
     # Verify company exists and user is admin
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(status_code=404, detail="Company not found")
-    
-    # Check admin permission
-    if current_user.role != "admin":
-        is_admin = db.query(CompanyMember).filter(
-            CompanyMember.companyid == company_id,
-            CompanyMember.userid == current_user.id,
-            CompanyMember.is_admin == True,
-            CompanyMember.is_active == True
-        ).first()
-        
-        if not is_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only company admins can create teams"
-            )
-    
+
+    if not check_company_admin(db, current_user, company_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only company admins can create teams"
+        )
+
+    # Membership is exclusive (one guide, one team, ever) -- fail with a clear 400 instead of
+    # letting the unique constraint on team_members.user_id raise a raw IntegrityError.
+    existing_membership = db.query(TeamMember).filter(TeamMember.user_id == current_user.id).first()
+    if existing_membership:
+        raise HTTPException(
+            status_code=400,
+            detail="You already belong to a team; membership is exclusive.",
+        )
+
     # Create team
     team = Team(
         name=payload.name,
@@ -506,12 +503,12 @@ def create_team(
     )
     db.add(team)
     db.flush()
-    
-    # Add creator as team admin
+
+    # Add creator as the team's master guide
     team_member = TeamMember(
         team_id=team.id,
         user_id=current_user.id,
-        team_role="admin"
+        role_level=1
     )
     db.add(team_member)
     db.commit()
@@ -617,74 +614,64 @@ def add_team_member(
     """
     Add a member to a team.
     User must be a guide in the company.
-    Only team admins can add members.
+    Team's master guide (role_level 1) or a company commercial admin can add members.
     """
-    
+
     # Verify team belongs to company
     team = db.query(Team).filter(
         Team.id == team_id,
         Team.company_id == company_id
     ).first()
-    
+
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    
-    # Check if current user is team admin
-    if current_user.role != "admin":
-        is_team_admin = db.query(TeamMember).filter(
-            TeamMember.team_id == team_id,
-            TeamMember.user_id == current_user.id,
-            TeamMember.team_role == "admin"
-        ).first()
-        
-        if not is_team_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only team admins can add members"
-            )
-    
+
+    if not check_team_or_company_admin(db, current_user, team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the team's master guide or a company admin can add members"
+        )
+
     # Verify user is a guide in the company
     company_member = db.query(CompanyMember).filter(
         CompanyMember.companyid == company_id,
         CompanyMember.userid == payload.user_id,
         CompanyMember.is_active == True
     ).first()
-    
+
     if not company_member:
         raise HTTPException(
             status_code=400,
             detail="User must be an active member of the company"
         )
-    
+
     user = db.query(User).filter(User.id == payload.user_id).first()
     if not user or user.role != "guide":
         raise HTTPException(
             status_code=400,
             detail="User must have guide role"
         )
-    
-    # Check if already a member
-    existing = db.query(TeamMember).filter(
-        TeamMember.team_id == team_id,
-        TeamMember.user_id == payload.user_id
-    ).first()
-    
+
+    # Membership is exclusive (one guide, one team, ever) -- check across ALL teams, not just
+    # this one, so the unique constraint on team_members.user_id never raises a raw 500.
+    existing = db.query(TeamMember).filter(TeamMember.user_id == payload.user_id).first()
+
     if existing:
         raise HTTPException(
             status_code=400,
-            detail="User is already a team member"
+            detail="User already belongs to a team; membership is exclusive."
         )
-    
-    # Add member
+
+    # Add member at the lowest authority level; the team's master can promote them afterward.
     team_member = TeamMember(
         team_id=team_id,
         user_id=payload.user_id,
-        team_role="day_guide"
+        role_level=4
     )
     db.add(team_member)
     db.commit()
     db.refresh(team_member)
-    
+
     return {"status": "success", "member_id": str(team_member.id)}
 
 
@@ -697,52 +684,49 @@ def update_member_role(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Update a team member's role. Only team admins can update roles."""
-    
-    ALLOWED_ROLES = {"admin", "lead_guide", "expert_guide", "assistant_guide", "day_guide"}
-    
-    if payload.team_role not in ALLOWED_ROLES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
-        )
-    
+    """Update a team member's role_level. Team's master guide or a company admin can update roles."""
+
     # Verify team belongs to company
     team = db.query(Team).filter(
         Team.id == team_id,
         Team.company_id == company_id
     ).first()
-    
+
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    
-    # Check if current user is team admin
-    if current_user.role != "admin":
-        is_team_admin = db.query(TeamMember).filter(
-            TeamMember.team_id == team_id,
-            TeamMember.user_id == current_user.id,
-            TeamMember.team_role == "admin"
-        ).first()
-        
-        if not is_team_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only team admins can update roles"
-            )
-    
+
+    if not check_team_or_company_admin(db, current_user, team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the team's master guide or a company admin can update roles"
+        )
+
     # Find member
     member = db.query(TeamMember).filter(
         TeamMember.id == member_id,
         TeamMember.team_id == team_id
     ).first()
-    
+
     if not member:
         raise HTTPException(status_code=404, detail="Team member not found")
-    
-    member.team_role = payload.team_role
+
+    # Spec 1.5/1.7: exactly one level-1 (master) per team. Don't allow demoting the last one
+    # without a successor already promoted -- same invariant remove_team_member protects below.
+    if member.role_level == 1 and payload.role_level != 1:
+        master_count = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.role_level == 1
+        ).count()
+        if master_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot demote the team's only master guide; promote a successor first."
+            )
+
+    member.role_level = payload.role_level
     db.commit()
-    
-    return {"status": "success", "user_id": str(member.user_id), "new_role": payload.team_role}
+
+    return {"status": "success", "user_id": str(member.user_id), "new_role_level": payload.role_level}
 
 
 @router.delete("/{company_id}/teams/{team_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -753,56 +737,48 @@ def remove_team_member(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user)
 ):
-    """Remove a member from a team. Only team admins can remove members."""
-    
+    """Remove a member from a team. Team's master guide or a company admin can remove members."""
+
     # Verify team belongs to company
     team = db.query(Team).filter(
         Team.id == team_id,
         Team.company_id == company_id
     ).first()
-    
+
     if not team:
         raise HTTPException(status_code=404, detail="Team not found")
-    
-    # Check if current user is team admin
-    if current_user.role != "admin":
-        is_team_admin = db.query(TeamMember).filter(
-            TeamMember.team_id == team_id,
-            TeamMember.user_id == current_user.id,
-            TeamMember.team_role == "admin"
-        ).first()
-        
-        if not is_team_admin:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only team admins can remove members"
-            )
-    
+
+    if not check_team_or_company_admin(db, current_user, team_id):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the team's master guide or a company admin can remove members"
+        )
+
     # Find member
     member = db.query(TeamMember).filter(
         TeamMember.id == member_id,
         TeamMember.team_id == team_id
     ).first()
-    
+
     if not member:
         raise HTTPException(status_code=404, detail="Team member not found")
-    
-    # Prevent removing the last admin
-    if member.team_role == "admin":
-        admin_count = db.query(TeamMember).filter(
+
+    # Prevent removing the last master guide (spec 1.7: blocked until a successor is promoted)
+    if member.role_level == 1:
+        master_count = db.query(TeamMember).filter(
             TeamMember.team_id == team_id,
-            TeamMember.team_role == "admin"
+            TeamMember.role_level == 1
         ).count()
-        
-        if admin_count <= 1:
+
+        if master_count <= 1:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot remove the last admin from the team"
+                detail="Cannot remove the team's only master guide; promote a successor first."
             )
-    
+
     db.delete(member)
     db.commit()
-    
+
     return None
 
 @router.get("/{company_id}/limits", response_model=CompanyLimitsResponse)

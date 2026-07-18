@@ -7,6 +7,9 @@ import InviteGuideModal from "../components/InviteGuideModal";
 
 const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
 
+// Cascading hierarchy, lower number = more power (see app/core/permissions.py).
+const ROLE_LEVEL_LABELS = { 1: "Master guide", 2: "Planner", 3: "Coordinator", 4: "Field guide" };
+
 export default function CompanyDashboard() {
   const { companyId } = useParams();
   const navigate = useNavigate();
@@ -180,7 +183,8 @@ export default function CompanyDashboard() {
     }
   };
 
-  const handleRoleChange = async (memberId, newRole) => {
+  const handleRoleChange = async (memberId, newRoleLevel) => {
+    const roleLevel = Number(newRoleLevel);
     try {
       const res = await fetch(
         `${API}/companies/${companyId}/teams/${selectedTeam.id}/members/${memberId}/role`,
@@ -190,18 +194,18 @@ export default function CompanyDashboard() {
             "Content-Type": "application/json",
             Authorization: `Bearer ${token}`,
           },
-          body: JSON.stringify({ team_role: newRole }),
+          body: JSON.stringify({ role_level: roleLevel }),
         }
       );
-      
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         throw new Error(errorData.detail || "Could not update role");
       }
-      
+
       // Update local state
       setTeamMembers(prev =>
-        prev.map(m => (m.id === memberId ? { ...m, team_role: newRole } : m))
+        prev.map(m => (m.id === memberId ? { ...m, role_level: roleLevel } : m))
       );
     } catch (err) {
       alert(`Error: ${err.message}`);
@@ -496,17 +500,16 @@ useEffect(() => {
                                 {isAdmin ? (
                                   <select
                                     className="form-select form-select-sm"
-                                    value={member.team_role}
+                                    value={member.role_level}
                                     onChange={(e) => handleRoleChange(member.id, e.target.value)}
 >
-<option value="admin">Admin</option>
-<option value="lead_guide">Lead Guide</option>
-<option value="expert_guide">Expert Guide</option>
-<option value="assistant_guide">Assistant Guide</option>
-<option value="day_guide">Day Guide</option>
+<option value={1}>{ROLE_LEVEL_LABELS[1]}</option>
+<option value={2}>{ROLE_LEVEL_LABELS[2]}</option>
+<option value={3}>{ROLE_LEVEL_LABELS[3]}</option>
+<option value={4}>{ROLE_LEVEL_LABELS[4]}</option>
 </select>
 ) : (
-<span className="badge bg-secondary">{member.team_role}</span>
+<span className="badge bg-secondary">{ROLE_LEVEL_LABELS[member.role_level] || member.role_level}</span>
 )}
 </td>
 {isAdmin && (

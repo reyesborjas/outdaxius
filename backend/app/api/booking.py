@@ -13,7 +13,6 @@ from app.models.activity_schedule import ActivitySchedule
 from app.models.program_schedule import ProgramSchedule
 from app.models.payment import Payment
 from app.schemas.payment import PaymentCreate, PaymentOut
-from datetime import datetime, timedelta
 from app.services.company_usage import companies_for_program_schedule, companies_for_activity_schedule
 from app.services.enforce_limits import enforce_company_monthly_booking_limits
 router = APIRouter()
@@ -184,37 +183,6 @@ def cancel_booking(booking_id: uuid.UUID,
     db.commit()
     db.refresh(b)
     return b
-
-CANCELLATION_WINDOW_HOURS = 48
-DEFAULT_CANCELLATION_FEE = 20.00  # ejemplo en USD
-
-@router.post("/booking/{booking_id}/cancel", response_model=BookingOut)
-def cancel_booking(booking_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
-    booking = db.query(Booking).filter(Booking.id == booking_id, Booking.userid == current_user.id).first()
-    if not booking:
-        raise HTTPException(status_code=404, detail="Booking not found")
-    if booking.status == "cancelled":
-        return booking  # idempotencia
-
-    # Buscar el horario de inicio relacionado
-    schedule = db.query(ActivitySchedule).filter(ActivitySchedule.id == booking.activityscheduleid).first()
-    if not schedule:
-        raise HTTPException(status_code=404, detail="Schedule not found")
-
-    # Calcular ventana de cancelación
-    now = datetime.utcnow()
-    window_limit = schedule.starttime - timedelta(hours=CANCELLATION_WINDOW_HOURS)
-    if now > window_limit:
-        booking.cancellation_fee = DEFAULT_CANCELLATION_FEE
-    else:
-        booking.cancellation_fee = 0
-    
-    booking.status = "cancelled"
-    booking.cancelled_at = now
-    db.add(booking)
-    db.commit()
-    db.refresh(booking)
-    return booking
 
 @router.patch("/bookings/{booking_id}/participants/{participant_id}")
 def edit_participant(booking_id: uuid.UUID, participant_id: str, updates: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

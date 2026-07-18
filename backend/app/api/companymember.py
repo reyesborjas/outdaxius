@@ -9,33 +9,18 @@ from app.models.companymember import CompanyMember
 from app.models.user import User
 from app.schemas.companymember import CompanyMemberCreate, CompanyMemberOut, CompanyMemberBase
 from app.api.deps import get_current_user, require_admin
+from app.core.permissions import check_company_admin, check_company_member
 
 router = APIRouter(prefix="/companymembers", tags=["companymembers"])
 
 
 def _require_company_admin(db: Session, current_user: User, company_id: UUID) -> None:
-    """Commercial authority check: platform admin, or an active is_admin member of this company."""
-    if current_user.role == "admin":
-        return
-    is_admin = db.query(CompanyMember).filter(
-        CompanyMember.companyid == company_id,
-        CompanyMember.userid == current_user.id,
-        CompanyMember.is_admin == True,
-        CompanyMember.is_active == True,
-    ).first()
-    if not is_admin:
+    if not check_company_admin(db, current_user, company_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Company admin access required")
 
 
 def _require_company_member(db: Session, current_user: User, company_id: UUID) -> None:
-    if current_user.role == "admin":
-        return
-    is_member = db.query(CompanyMember).filter(
-        CompanyMember.companyid == company_id,
-        CompanyMember.userid == current_user.id,
-        CompanyMember.is_active == True,
-    ).first()
-    if not is_member:
+    if not check_company_member(db, current_user, company_id):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not a member of this company")
 
 

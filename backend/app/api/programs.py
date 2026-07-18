@@ -17,6 +17,7 @@ from app.models.activity import Activity
 from app.models.programactivity import ProgramActivity
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
+from app.core.permissions import require_action, check_permission, get_user_team_membership
 
 
 router = APIRouter()
@@ -55,7 +56,7 @@ def list_programs(db: Session = Depends(get_db)):
 def create_program(
     payload: ProgramCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_action("program.create")),
     company_id = Depends(get_current_company_id)
 ):
     if company_id:
@@ -66,11 +67,15 @@ def create_program(
 
     # 🔥 NUEVO: Si se proporciona guide_leader, validar que existe
     guide_leader_id = payload.guide_leader if payload.guide_leader else user.id
-    
+
     if payload.guide_leader:
         leader = db.query(User).filter(User.id == payload.guide_leader).first()
         if not leader:
             raise HTTPException(status_code=404, detail="Guide leader not found")
+
+    # require_action already confirmed the caller has role_level 1 in some team, so this is
+    # always resolvable here.
+    membership = get_user_team_membership(db, user.id)
 
     prog = Program(
         title=payload.title,
@@ -79,11 +84,12 @@ def create_program(
         created_by=user.id,
         guide_leader=guide_leader_id,  # 🔥 NUEVO
         gallery=payload.gallery or [],
+        team_id=membership.team_id,
     )
-    db.add(prog) 
-    db.commit() 
-    db.refresh(prog)    
-    db.refresh(prog, ['creator', 'type', 'leader'])  
+    db.add(prog)
+    db.commit()
+    db.refresh(prog)
+    db.refresh(prog, ['creator', 'type', 'leader'])
     return prog
 
 @router.put("/{program_id}", response_model=ProgramOut)
@@ -96,9 +102,9 @@ def update_program(
     program = db.query(Program).filter(Program.id == program_id).first()
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
-    if current_user.role != "admin" and program.created_by != current_user.id:
+    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
         raise HTTPException(status_code=403, detail="Not allowed")
-    
+
     update_data = payload.dict(exclude_unset=True)
     
     if "program_type" in update_data and update_data["program_type"]:
@@ -129,7 +135,7 @@ def delete_program(
     p = db.query(Program).filter(Program.id == program_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Program not found")
-    if current_user.role != "admin" and p.created_by != current_user.id:
+    if not check_permission(db, current_user, "program.delete", team_id=p.team_id):
         raise HTTPException(status_code=403, detail="Not allowed")
     db.delete(p)
     db.commit()
@@ -175,7 +181,7 @@ def link_activities_to_program(
         raise HTTPException(status_code=404, detail="Program not found")
     
     # Verificar permisos
-    if current_user.role != "admin" and program.created_by != current_user.id:
+    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
         raise HTTPException(status_code=403, detail="Not allowed to modify this program")
     
     # Verificar que todas las actividades existen
@@ -232,7 +238,7 @@ def unlink_activity_from_program(
         raise HTTPException(status_code=404, detail="Program not found")
     
     # Verificar permisos
-    if current_user.role != "admin" and program.created_by != current_user.id:
+    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
         raise HTTPException(status_code=403, detail="Not allowed to modify this program")
     
     # Buscar y eliminar el vínculo

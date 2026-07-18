@@ -11,6 +11,7 @@ from typing import List
 import uuid
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
+from app.core.permissions import require_action
 
 router = APIRouter()
 
@@ -18,7 +19,7 @@ router = APIRouter()
 def create_program_schedule(
     payload: ProgramScheduleCreate,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_action("schedule.create")),
     company_id = Depends(get_current_company_id),
 ):
     if company_id:

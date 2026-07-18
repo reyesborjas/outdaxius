@@ -19,6 +19,8 @@ class Activity(Base):
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
     location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id"), nullable=True)
     guide_leader = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    # Nullable: see app.models.programs.Program.team_id -- same Phase 2 backfill gap.
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
 
     # datos adicionales
     gallery = Column(JSONB, nullable=False, server_default="[]")

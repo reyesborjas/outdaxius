@@ -10,6 +10,7 @@ from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.program_schedule import ProgramSchedule
 from app.models.programactivity import ProgramActivity
+from app.core.permissions import require_action
 
 router = APIRouter()
 
@@ -27,7 +28,7 @@ def list_activity_schedules(
 def create_activity_schedule(
     payload: ActivityScheduleCreate,
     db: Session = Depends(get_db),
-    current: User = Depends(get_current_user)
+    current: User = Depends(require_action("schedule.create"))
 ):
     if payload.program_schedule_id is None:
         sched = ActivitySchedule(**payload.model_dump())

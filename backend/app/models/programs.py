@@ -15,11 +15,15 @@ class Program(Base):
     gallery = Column(JSON, default=[])
     min_activities = Column(Integer, default=2)
     created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
-    guide_leader = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  
+    guide_leader = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
     created_at = Column(Text, default=func.now())
     updated_at = Column(Text, default=func.now())
     program_type = Column(UUID(as_uuid=True), ForeignKey("types.id"), nullable=False)
-    
+    # Nullable: Phase 2's migration could only backfill this for rows whose creator was already
+    # a team member. Rows with team_id IS NULL need manual assignment before anyone but a
+    # platform admin can edit/delete them (see app.core.permissions).
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
+
     # Relationships
     type = relationship("Types", foreign_keys=[program_type])
     creator = relationship("User",foreign_keys=[created_by],back_populates="created_programs")

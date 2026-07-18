@@ -15,6 +15,7 @@ from app.schemas.activity import ActivityCreate, ActivityOut
 from app.api.deps import get_current_user
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
+from app.core.permissions import require_action, check_permission, get_user_team_membership
 
 router = APIRouter()
 
@@ -129,35 +130,38 @@ def get_activity(activity_id: uuid.UUID, db: Session = Depends(get_db)):
 def create_activity(
     payload: ActivityCreate,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_action("activity.create")),
     company_id = Depends(get_current_company_id),
 ):
     """
     Crea una nueva actividad validando location, type y asignando created_by.
     """
     print(f"Received payload: {payload.dict()}")
-    
+
     # Valida que location_id exista
     location = db.query(Location).filter(Location.id == payload.location_id).first()
     if not location:
         raise HTTPException(status_code=404, detail="Location not found")
-    
+
     # Valida que el activity_type exista
     act_type = db.query(Types).filter(Types.id == payload.activity_type).first()
     if not act_type:
         raise HTTPException(status_code=404, detail="Activity type not found")
-    
+
     # Si se proporciona guide_leader, validar que existe
     guide_leader_id = payload.guide_leader if payload.guide_leader else user.id
-    
+
     if payload.guide_leader:
         leader = db.query(User).filter(User.id == payload.guide_leader).first()
         if not leader:
             raise HTTPException(status_code=404, detail="Guide leader not found")
-    
+
     # Normaliza la galería
     normalized_gallery = normalize_gallery(payload.gallery)
-    
+
+    # require_action already confirmed the caller has role_level <= 3 in some team.
+    membership = get_user_team_membership(db, user.id)
+
     # Crea la actividad
     act = Activity(
         title=payload.title,
@@ -166,9 +170,10 @@ def create_activity(
         location_id=payload.location_id,
         gallery=normalized_gallery,
         created_by=user.id,
-        guide_leader=guide_leader_id
+        guide_leader=guide_leader_id,
+        team_id=membership.team_id,
     )
-    
+
     db.add(act)
     db.commit()
     db.refresh(act)
@@ -202,9 +207,9 @@ def update_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     
-    if current_user.role != "admin" and activity.created_by != current_user.id:
+    if not check_permission(db, current_user, "activity.edit", team_id=activity.team_id):
         raise HTTPException(status_code=403, detail="Not allowed")
-    
+
     # Actualiza solo los campos proporcionados
     update_data = payload.dict(exclude_unset=True)
     
@@ -256,9 +261,9 @@ def delete_activity(
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
     
-    if current_user.role != "admin" and activity.created_by != current_user.id:
+    if not check_permission(db, current_user, "activity.delete", team_id=activity.team_id):
         raise HTTPException(status_code=403, detail="Not allowed")
-    
+
     db.delete(activity)
     db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)

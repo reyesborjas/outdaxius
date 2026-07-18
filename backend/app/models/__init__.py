@@ -18,3 +18,6 @@ from .team import Team, TeamMember
 from .payment import Payment
 from .invitation import InvitationCode
 from .types import Types
+from .membership_request import MembershipRequest
+from .assignment import Assignment
+from .company_payment_account import CompanyPaymentAccount
