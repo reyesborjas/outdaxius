@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 export default function Schedules() {
   const { token, loading } = useAuth();
   const [programSchedules, setProgramSchedules] = useState([]);
@@ -19,16 +21,16 @@ export default function Schedules() {
   const fetchSchedules = async () => {
     try {
       const [progSchedRes, actSchedRes, progRes, actRes] = await Promise.all([
-        fetch("http://127.0.0.1:8000/api/program-schedules/", {
+        fetch(`${API}/program-schedules/`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch("http://127.0.0.1:8000/api/activity-schedules/", {
+        fetch(`${API}/activity-schedules/`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch("http://127.0.0.1:8000/api/programs/", {
+        fetch(`${API}/programs/`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch("http://127.0.0.1:8000/api/activities/", {
+        fetch(`${API}/activities/`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);

@@ -1,6 +1,8 @@
 // imports extra:
 import { useState } from "react";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 function PayModal({ booking, token, onClose, onDone }) {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
@@ -14,7 +16,7 @@ function PayModal({ booking, token, onClose, onDone }) {
     if (!amount) { setErr("Amount required"); return; }
     setSubmitting(true);
     try {
-      const r = await fetch(`http://127.0.0.1:8000/api/bookings/${booking.id}/pay`, {
+      const r = await fetch(`${API}/bookings/${booking.id}/pay`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",

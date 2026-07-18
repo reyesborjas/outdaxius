@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 import SearchableSelect from "../components/SearchableSelect";
 
-const API = "http://127.0.0.1:8000/api";
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
 
 async function searchLocations(query) {
   const res = await fetch(`${API}/locations/search?q=${encodeURIComponent(query)}`);

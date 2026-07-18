@@ -6,7 +6,7 @@ import EditActivityModal from "./EditActivityModal";
 import ViewActivityModal from "./ViewActivityModal";
 import SearchBar from "../components/SearchBar";
 
-const API = "http://127.0.0.1:8000/api";
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
 
 function normalizeGallery(g) {
   if (!Array.isArray(g)) return [];

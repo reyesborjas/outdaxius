@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 export default function EditActivityModal({ activity, onClose, onSaved, onDeleted }) {
   const { token } = useAuth();
   const [form, setForm] = useState({
@@ -34,7 +36,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
     setSaving(true); setError("");
     try {
       const payload = { ...form, gallery };
-      const res = await fetch(`http://127.0.0.1:8000/api/activities/${activity.id}`, {
+      const res = await fetch(`${API}/activities/${activity.id}`, {
         method: "PUT",
         headers: {
           "Content-Type": "application/json",
@@ -59,7 +61,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
   const handleDelete = async () => {
     setDeleting(true); setError("");
     try {
-      const res = await fetch(`http://127.0.0.1:8000/api/activities/${activity.id}`, {
+      const res = await fetch(`${API}/activities/${activity.id}`, {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });

@@ -2,6 +2,8 @@
 import React, { useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 const preventEnterSubmit = (e) => {
   if (e.key === "Enter") e.preventDefault();
 };
@@ -123,7 +125,7 @@ export default function Register() {
     }
 
     try {
-      const res = await fetch("http://127.0.0.1:8000/api/auth/register", {
+      const res = await fetch(`${API}/auth/register`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),

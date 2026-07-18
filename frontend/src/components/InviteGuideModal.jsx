@@ -2,6 +2,8 @@
 
 import { useState } from "react";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 export default function InviteGuideModal({ companyId, onClose, onSuccess }) {
   const [email, setEmail] = useState("");
   const [expires, setExpires] = useState(7);
@@ -16,7 +18,7 @@ export default function InviteGuideModal({ companyId, onClose, onSuccess }) {
     try {
       const token = localStorage.getItem("token");
       const res = await fetch(
-        `http://localhost:8000/api/companies/${companyId}/invitations`,
+        `${API}/companies/${companyId}/invitations`,
         {
           method: "POST",
           headers: {

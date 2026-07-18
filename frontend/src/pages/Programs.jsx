@@ -6,7 +6,7 @@ import EditProgramModal from "./EditProgramModal";
 import ViewProgramModal from "./ViewProgramModal";
 import SearchBar from "../components/SearchBar";
 
-const API = "http://127.0.0.1:8000/api";
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
 
 // normaliza y ordena galería por position
 function normalizeGallery(g) {

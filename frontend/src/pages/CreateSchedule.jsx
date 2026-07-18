@@ -2,6 +2,8 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
 
+const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+
 export default function CreateSchedule() {
   const { token } = useAuth();
   const companyId = localStorage.getItem("activeCompanyId");
@@ -27,13 +29,13 @@ export default function CreateSchedule() {
   // Carga base
   useEffect(() => {
     if (!token) return;
-    fetch("http://127.0.0.1:8000/api/programs/", {
+    fetch(`${API}/programs/`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
       .then(setPrograms)
       .catch(() => {});
-    fetch("http://127.0.0.1:8000/api/activities/", {
+    fetch(`${API}/activities/`, {
       headers: { Authorization: `Bearer ${token}` },
     })
       .then((r) => r.json())
@@ -44,7 +46,7 @@ export default function CreateSchedule() {
   // Cargar actividades ligadas al programa
   useEffect(() => {
     if (mode === "program" && form.program_id) {
-      fetch(`http://127.0.0.1:8000/api/programs/${form.program_id}/activities`, {
+      fetch(`${API}/programs/${form.program_id}/activities`, {
         headers: { Authorization: `Bearer ${token}` },
       })
         .then((r) => r.json())
@@ -96,7 +98,7 @@ export default function CreateSchedule() {
           min_participants: form.min_participants ? parseInt(form.min_participants) : null,
           max_participants: form.max_participants ? parseInt(form.max_participants) : null,
         };
-        const res = await fetch("http://127.0.0.1:8000/api/activity-schedules/", {
+        const res = await fetch(`${API}/activity-schedules/`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -122,7 +124,7 @@ export default function CreateSchedule() {
           end_time: form.end_time,
           price: form.price ? parseFloat(form.price) : null,
         };
-        const res = await fetch("http://127.0.0.1:8000/api/program-schedules/", {
+        const res = await fetch(`${API}/program-schedules/`, {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -149,7 +151,7 @@ export default function CreateSchedule() {
             start_time: times.start,
             end_time: times.end,
           };
-          const resAct = await fetch("http://127.0.0.1:8000/api/activity-schedules/", {
+          const resAct = await fetch(`${API}/activity-schedules/`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
