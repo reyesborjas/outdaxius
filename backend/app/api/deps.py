@@ -1,4 +1,5 @@
 # backend/app/api/deps.py
+from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from sqlalchemy.orm import Session
@@ -11,6 +12,10 @@ import uuid
 from app.models.companymember import CompanyMember
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+# auto_error=False: resolves to None instead of raising when no Authorization header is sent --
+# for endpoints that are public by default but behave differently for an authenticated caller
+# (e.g. list_program_schedules's mine_only param).
+_oauth2_scheme_optional = OAuth2PasswordBearer(tokenUrl="/api/auth/login", auto_error=False)
 
 def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
     credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
@@ -24,6 +29,25 @@ def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_
     user = db.query(User).filter(User.id == user_id).first()
     if not user or not user.is_active:
         raise credentials_exception
+    return user
+
+def get_current_user_optional(
+    db: Session = Depends(get_db),
+    token: Optional[str] = Depends(_oauth2_scheme_optional),
+) -> Optional[User]:
+    """Like get_current_user, but returns None instead of 401 when no/invalid token is sent."""
+    if not token:
+        return None
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            return None
+    except JWTError:
+        return None
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        return None
     return user
 
 def require_role(required: set):

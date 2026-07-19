@@ -67,7 +67,7 @@ export default function ActivitiesGrid({ asCarousel = false }) {
             >
               <div className="fw-semibold text-truncate">{items[idx]?.title}</div>
               <div className="small text-truncate">
-                {items[idx]?.location?.display_name || items[idx]?.activity_type || "Activity"}
+                {items[idx]?.location?.display_name || items[idx]?.type?.type_name || "Activity"}
               </div>
             </div>
           </div>
@@ -101,7 +101,7 @@ export default function ActivitiesGrid({ asCarousel = false }) {
             <div className="p-2">
               <div className="fw-semibold text-truncate">{a.title}</div>
               <div className="small text-muted text-truncate">
-                {(a.activity.type?.type_name || "–")}
+                {(a.type?.type_name || "–")}
                 {a.location?.display_name ? ` · ${a.location.display_name}` : ""}
               </div>
               <div className="small text-truncate" style={{ lineHeight: "1.25" }}>

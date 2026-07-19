@@ -447,7 +447,10 @@ export default function ViewActivityModal({
             )}
           </div>
 
-          <div className="modal-footer">
+          <div className="modal-footer d-flex justify-content-between align-items-center">
+            <span className="small text-muted">
+              By {activity?.creator?.display_name || activity?.creator?.email || "Unknown"}
+            </span>
             <button onClick={onClose} className="btn btn-secondary">
               Close
             </button>

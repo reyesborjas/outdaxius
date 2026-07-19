@@ -1,12 +1,12 @@
 # app/api/users.py
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import Any, List, Optional, Union
+from typing import Any, List, Optional
 from uuid import UUID
 from pydantic import ConfigDict
 from app.db.session import get_db
 from app.models.user import User
-from app.schemas.user import UserUpdate, UserOut, UserWithCompanyOut, UserCreate
+from app.schemas.user import UserUpdate, UserOut, UserCreate
 from app.api.deps import get_current_user
 from app.schemas.user import UserCreate
 from app.api.deps import require_admin
@@ -34,78 +34,85 @@ def update_me(
     db.refresh(user)
     return user
 
-@router.get("/", response_model=List[Union[UserOut, UserWithCompanyOut]])
+@router.get("/", response_model=List[dict])
 def list_users(
     role: Optional[str] = None,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
     """
-    Lista usuarios. Si role=guide, enriquece con información de company.
+    Platform admins see/filter every user, unchanged. Everyone else sees only themselves plus
+    their own company's other active members (company_members-scoped, not team_id-scoped --
+    resolving to "self + company-mates", not "self + team-mates"). Every row is enriched with
+    company membership info (including company_member_id, which the frontend uses to call the
+    correctly-scoped PUT /companymembers/{id} for activate/deactivate rather than touching this
+    user's platform-wide account state).
     """
-    if current_user.role not in {"admin", "company", "guide"}:
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Insufficient permissions"
-        )
-    
-    query = db.query(User)
-    
+    from app.models.companymember import CompanyMember
+    from app.models.company import Company
+
+    if current_user.role == "admin":
+        query = db.query(User)
+    else:
+        my_membership = db.query(CompanyMember).filter(
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        member_user_ids = {current_user.id}
+        if my_membership:
+            member_user_ids |= {
+                m.userid for m in db.query(CompanyMember).filter(
+                    CompanyMember.companyid == my_membership.companyid,
+                    CompanyMember.is_active == True
+                ).all()
+            }
+        query = db.query(User).filter(User.id.in_(member_user_ids))
+
     if role:
         query = query.filter(User.role == role)
-    
+
     users = query.all()
-    
-    # ✅ Si se solicitan guides, enriquecer con info de company
-    if role == "guide":
-        from app.models.companymember import CompanyMember
-        from app.models.company import Company
-        
-        enriched_users = []
-        for user in users:
-            # Convertir a dict base
-            user_dict = {
-                "id": user.id,
-                "display_name": user.display_name,
-                "email": user.email,
-                "role": user.role,
-                "preferred_language": user.preferred_language,
-                "is_active": user.is_active,
-                "first_name": user.first_name,
-                "last_name": user.last_name,
-                "national_id": user.national_id,
-                "passport_number": user.passport_number,
-                "phone": user.phone,
-                "profile_picture": user.profile_picture,
-                "birth_date": user.birth_date,
-                "tax_id": user.tax_id,
-                "profile": user.profile,
-                "fiscal_data": user.fiscal_data,
-            }
-            
-            # Buscar membership activo
-            membership = db.query(CompanyMember).filter(
-                CompanyMember.userid == user.id,
-                CompanyMember.is_active == True
+
+    enriched_users = []
+    for user in users:
+        user_dict = {
+            "id": user.id,
+            "display_name": user.display_name,
+            "email": user.email,
+            "role": user.role,
+            "preferred_language": user.preferred_language,
+            "is_active": user.is_active,
+            "first_name": user.first_name,
+            "last_name": user.last_name,
+            "national_id": user.national_id,
+            "passport_number": user.passport_number,
+            "phone": user.phone,
+            "profile_picture": user.profile_picture,
+            "birth_date": user.birth_date,
+            "tax_id": user.tax_id,
+            "profile": user.profile,
+            "fiscal_data": user.fiscal_data,
+        }
+
+        membership = db.query(CompanyMember).filter(
+            CompanyMember.userid == user.id,
+            CompanyMember.is_active == True
+        ).first()
+
+        if membership:
+            company = db.query(Company).filter(
+                Company.id == membership.companyid
             ).first()
-            
-            if membership:
-                company = db.query(Company).filter(
-                    Company.id == membership.companyid
-                ).first()
-                
-                if company:
-                    user_dict["company_name"] = company.name
-                    user_dict["company_id"] = company.id
-                    user_dict["is_company_admin"] = membership.is_admin
-                    user_dict["company_position"] = membership.position
-            
-            enriched_users.append(user_dict)
-        
-        return enriched_users
-    
-    # Para roles que no son guide, retornar sin enriquecimiento
-    return users
+
+            user_dict["company_member_id"] = membership.id
+            user_dict["company_id"] = membership.companyid
+            user_dict["company_name"] = company.name if company else None
+            user_dict["is_company_admin"] = membership.is_admin
+            user_dict["company_position"] = membership.position
+
+        enriched_users.append(user_dict)
+
+    return enriched_users
 
 @router.get("/me", response_model=UserOut)
 def get_me(current_user: User = Depends(get_current_user)):

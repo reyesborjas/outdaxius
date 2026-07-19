@@ -26,7 +26,8 @@ class ActivityUpdate(BaseModel):
     activity_type: Optional[uuid.UUID] = None
     gallery: Optional[List[dict]] = None
     location_id: Optional[uuid.UUID] = None
-    guide_leader: Optional[uuid.UUID] = None 
+    guide_leader: Optional[uuid.UUID] = None
+    is_shared: Optional[bool] = None
 
 # ---------- Helper function ----------
 def normalize_gallery(gallery):
@@ -172,6 +173,7 @@ def create_activity(
         created_by=user.id,
         guide_leader=guide_leader_id,
         team_id=membership.team_id,
+        is_shared=payload.is_shared,
     )
 
     db.add(act)

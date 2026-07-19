@@ -21,6 +21,7 @@ class ActivityCreate(BaseModel):
     location_id: UUID
     guide_leader: Optional[UUID] = None  # 🔥 NUEVO
     gallery: Optional[List[Dict]] = Field(default_factory=list)
+    is_shared: bool = False
 
 class ActivityOut(BaseModel):
     id: UUID
@@ -31,8 +32,9 @@ class ActivityOut(BaseModel):
     location: Optional[LocationOut] = None
     gallery: List[Dict] = Field(default_factory=list)
     creator: Optional[UserOut] = None
-    leader: Optional[UserOut] = None  
-    guide_leader: Optional[UUID] = None  
+    leader: Optional[UserOut] = None
+    guide_leader: Optional[UUID] = None
+    is_shared: bool = False
     created_at: datetime
     updated_at: datetime
 

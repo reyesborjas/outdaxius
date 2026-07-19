@@ -1,5 +1,5 @@
 # app/models/programs.py
-from sqlalchemy import Column, String, Text, JSON, Integer, ForeignKey
+from sqlalchemy import Column, String, Text, JSON, Integer, ForeignKey, Boolean
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -23,6 +23,9 @@ class Program(Base):
     # a team member. Rows with team_id IS NULL need manual assignment before anyone but a
     # platform admin can edit/delete them (see app.core.permissions).
     team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id"), nullable=True)
+    # Reuse policy: same team or same company may always schedule this; a different company may
+    # only do so when this is true (app.core.permissions.check_can_reuse).
+    is_shared = Column(Boolean, nullable=False, default=False)
 
     # Relationships
     type = relationship("Types", foreign_keys=[program_type])

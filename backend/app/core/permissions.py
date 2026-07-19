@@ -171,6 +171,32 @@ def check_team_or_company_admin(db: Session, user: User, team_id: UUID) -> bool:
     return check_company_admin(db, user, team.company_id)
 
 
+def check_can_reuse(
+    db: Session,
+    creator_team_id: Optional[UUID],
+    owner_team_id: Optional[UUID],
+    is_shared: bool,
+) -> bool:
+    """
+    Reuse policy for scheduling someone else's activity/program: the caller's own team may
+    always schedule it. Any team in the SAME company may always schedule it too. A team in a
+    DIFFERENT company may only schedule it when the resource is explicitly marked is_shared.
+    """
+    if not creator_team_id or not owner_team_id:
+        return False
+    if creator_team_id == owner_team_id:
+        return True
+
+    creator_team = db.query(Team).filter(Team.id == creator_team_id).first()
+    owner_team = db.query(Team).filter(Team.id == owner_team_id).first()
+    if not creator_team or not owner_team:
+        return False
+    if creator_team.company_id == owner_team.company_id:
+        return True
+
+    return bool(is_shared)
+
+
 def check_can_be_assigned(db: Session, user_id: UUID, activity_schedule_id: UUID) -> bool:
     """
     Spec 1.6: a role_level 4 (field) guide may lead/participate in a standalone activity when

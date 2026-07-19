@@ -13,6 +13,7 @@ export default function CreateProgram() {
     description: "",
     program_type: "",
     min_activities: 1,
+    is_shared: false,
   });
   const [gallery, setGallery] = useState([]);
   const [error, setError] = useState("");
@@ -140,6 +141,7 @@ export default function CreateProgram() {
         description: "",
         program_type: types.length > 0 ? types[0].id : "",
         min_activities: 1,
+        is_shared: false,
       });
       setGallery([]);
       setStep(1);
@@ -291,6 +293,19 @@ export default function CreateProgram() {
               >
                 + Add Image
               </button>
+
+              <div className="form-check mb-4">
+                <input
+                  type="checkbox"
+                  className="form-check-input"
+                  id="programIsShared"
+                  checked={form.is_shared}
+                  onChange={(e) => setField("is_shared", e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="programIsShared">
+                  Allow teams in other companies to schedule this program
+                </label>
+              </div>
 
               <div className="d-flex gap-2">
                 <button

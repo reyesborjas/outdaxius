@@ -37,6 +37,7 @@ export default function Activities() {
 
   const [all, setAll] = useState([]);
   const [list, setList] = useState([]);
+  const [scheduleCounts, setScheduleCounts] = useState({});
 
   const [q, setQ] = useState("");
   const [scope, setScope] = useState("all"); // all | activity | location | program
@@ -63,6 +64,33 @@ export default function Activities() {
         if (!alive) return;
         setAll([]);
         setList([]);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [token]);
+
+  // Bulk-fetch schedules once so each card can show an "N upcoming" badge without an N+1
+  // request-per-card. Public/unscoped on purpose -- this is the customer-facing browse view.
+  useEffect(() => {
+    let alive = true;
+    const headers = token ? { Authorization: `Bearer ${token}` } : {};
+    fetch(`${API}/activity-schedules/`, { headers })
+      .then((r) => (r.ok ? r.json() : []))
+      .then((rows) => {
+        if (!alive) return;
+        const now = Date.now();
+        const counts = {};
+        (Array.isArray(rows) ? rows : []).forEach((s) => {
+          if (!s.activity_id) return;
+          if (s.start_time && new Date(s.start_time).getTime() < now) return;
+          counts[s.activity_id] = (counts[s.activity_id] || 0) + 1;
+        });
+        setScheduleCounts(counts);
+      })
+      .catch(() => {
+        if (!alive) return;
+        setScheduleCounts({});
       });
     return () => {
       alive = false;
@@ -214,6 +242,14 @@ const runSearch = async ({ query }) => {
                     {a.location?.display_name ? ` · ${a.location.display_name}` : ""}
                   </div>
                   <p className="text-body text-truncate mt-1 mb-0">{a.description}</p>
+                  {!!scheduleCounts[a.id] && (
+                    <span className="badge bg-success-subtle text-success-emphasis mt-2">
+                      {scheduleCounts[a.id]} upcoming schedule{scheduleCounts[a.id] === 1 ? "" : "s"}
+                    </span>
+                  )}
+                  <div className="small text-muted mt-2 border-top pt-2">
+                    By {a.creator?.display_name || a.creator?.email || "Unknown"}
+                  </div>
                 </div>
               </div>
             );

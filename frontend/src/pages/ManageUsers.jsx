@@ -30,6 +30,7 @@ export default function ManageUsers() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState();
   const [refreshing, setRefreshing] = useState(false);
+  const [isCompanyAdmin, setIsCompanyAdmin] = useState(false);
 
   // Verificar permisos - sólo admin y guide pueden acceder
   useEffect(() => {
@@ -38,6 +39,20 @@ export default function ManageUsers() {
       navigate("/main");
     }
   }, [user, navigate]);
+
+  // Company admins (commercial axis, company_members.is_admin) can also manage their own
+  // company's members here, alongside platform admins.
+  useEffect(() => {
+    if (!user || user.role === "admin") return;
+    fetchWithAuth(buildBackendUrl("/users/me/company-info"), {
+      headers: { Accept: "application/json" },
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((info) => setIsCompanyAdmin(!!(info?.type === "company_member" && info?.is_admin)))
+      .catch(() => setIsCompanyAdmin(false));
+  }, [user, fetchWithAuth]);
+
+  const canManage = user?.role === "admin" || isCompanyAdmin;
 
   // Función para cargar usuarios - CORREGIDA con URLs completas
   const fetchUsers = useCallback(async () => {
@@ -87,10 +102,10 @@ export default function ManageUsers() {
     }
   }, [user, fetchUsers]);
 
-  // Manejar activación/desactivación de usuarios
+  // Platform admins: activate/deactivate the user's platform account (users.is_active).
   const handleToggleActive = async (userId, currentActive) => {
     if (!window.confirm(`Are you sure you want to ${currentActive ? "deactivate" : "activate"} this user?`)) return;
-    
+
     try {
       setRefreshing(true);
       // CORRECCIÓN: URL completa para PATCH
@@ -99,19 +114,51 @@ export default function ManageUsers() {
         fullUrl,
         {
           method: "PATCH",
-          headers: { 
+          headers: {
             "Content-Type": "application/json",
           },
           body: JSON.stringify({ is_active: !currentActive }),
         }
       );
-      
+
       if (!res.ok) {
         const errorText = await res.text();
         throw new Error(`Failed to update user status: ${res.status} ${errorText}`);
       }
-      
+
       // Recargar la lista de usuarios
+      await fetchUsers();
+    } catch (e) {
+      setError(String(e.message || e));
+      setRefreshing(false);
+    }
+  };
+
+  // Company admins: remove the person from THIS company (company_members.is_active) -- does not
+  // touch their platform account. They stop appearing in this company-scoped list once removed.
+  // PUT /companymembers/{id} requires position (no default), so it must be resent unchanged;
+  // is_admin is resent too so removal doesn't silently reset a fellow admin's commercial role.
+  const handleRemoveFromCompany = async (targetUser) => {
+    if (!window.confirm("Remove this person from the company? They can be re-invited later.")) return;
+
+    try {
+      setRefreshing(true);
+      const fullUrl = buildBackendUrl(`/companymembers/${targetUser.company_member_id}`);
+      const res = await fetchWithAuth(fullUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          position: targetUser.company_position,
+          is_admin: !!targetUser.is_company_admin,
+          is_active: false,
+        }),
+      });
+
+      if (!res.ok) {
+        const errorText = await res.text();
+        throw new Error(`Failed to remove member: ${res.status} ${errorText}`);
+      }
+
       await fetchUsers();
     } catch (e) {
       setError(String(e.message || e));
@@ -155,9 +202,11 @@ export default function ManageUsers() {
     <div className="container py-4">
       <h2 className="text-h2 mb-3">Manage Users</h2>
       <p className="mb-3">
-        {user?.role === "admin" 
-          ? "Admins can view, search, modify roles, and activate/deactivate all users (except other admins)." 
-          : "Guides can view and search all users."}
+        {user?.role === "admin"
+          ? "Platform admins can view, search, modify roles, and activate/deactivate every user."
+          : isCompanyAdmin
+          ? "Showing yourself and your company's members. As a company admin, you can remove members from the company."
+          : "Showing yourself and your company's members."}
       </p>
       
       {/* Barra de búsqueda */}
@@ -261,10 +310,9 @@ export default function ManageUsers() {
                     {u.first_name || u.firstname || "-"} {u.last_name || u.lastname || "-"}
                   </td>
                   <td>
-                    {/* Solo los admins pueden modificar roles y activar/desactivar */}
+                    {/* Platform admins: full control over role + platform account status. */}
                     {user?.role === "admin" && u.role !== "admin" && (
                       <div className="d-flex flex-column gap-2">
-                        {/* Selector de rol */}
                         <select
                           className="form-select form-select-sm"
                           value={u.role}
@@ -276,8 +324,7 @@ export default function ManageUsers() {
                           <option value="guide">Guide</option>
                           <option value="admin">Admin</option>
                         </select>
-                        
-                        {/* Botón activar/desactivar */}
+
                         <button
                           className={`btn btn-sm ${u.is_active ? "btn-outline-warning" : "btn-outline-success"}`}
                           onClick={() => handleToggleActive(u.id, u.is_active)}
@@ -294,8 +341,25 @@ export default function ManageUsers() {
                         </button>
                       </div>
                     )}
-                    
-                    {user?.role === "guide" && (
+
+                    {/* Company admins: remove company-mates from the company. Never touches
+                        platform role or platform account status -- see handleRemoveFromCompany. */}
+                    {user?.role !== "admin" && isCompanyAdmin && u.id !== user?.id && u.company_member_id && (
+                      <button
+                        className="btn btn-sm btn-outline-danger"
+                        onClick={() => handleRemoveFromCompany(u)}
+                        disabled={refreshing}
+                        title="Remove from company"
+                      >
+                        {refreshing ? (
+                          <span className="spinner-border spinner-border-sm" role="status"></span>
+                        ) : (
+                          "Remove from company"
+                        )}
+                      </button>
+                    )}
+
+                    {!canManage && (
                       <span className="text-muted">View only</span>
                     )}
                   </td>

@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from uuid import UUID
 import uuid
 from app.schemas.types import TypesOut
+from app.schemas.user import UserOut
 from typing import Optional, List
 
 class ProgramOut(BaseModel):
@@ -13,7 +14,8 @@ class ProgramOut(BaseModel):
     min_activities: Optional[int] = None
     program_type: UUID
     type: TypesOut
-    
+    is_shared: bool = False
+    creator: Optional[UserOut] = None
 
     class Config:
         from_attributes = True
@@ -25,3 +27,4 @@ class ProgramCreate(BaseModel):
     min_activities: Optional[int]
     program_type: UUID
     guide_leader: Optional[UUID] = None
+    is_shared: bool = False

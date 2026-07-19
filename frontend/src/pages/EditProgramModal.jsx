@@ -11,6 +11,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
     description: "",
     program_type: "", // 🔥 Ahora guardará el UUID
     min_activities: 1,
+    is_shared: false,
   });
   const [gallery, setGallery] = useState([]);
 
@@ -36,6 +37,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
       description: program.description || "",
       program_type: program.program_type || "", // 🔥 Guarda el UUID directamente
       min_activities: Number(program.min_activities) || 1,
+      is_shared: !!program.is_shared,
     });
     setGallery(
       Array.isArray(program.gallery)
@@ -120,6 +122,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
         description: form.description,
         program_type: form.program_type, // UUID
         min_activities: form.min_activities,
+        is_shared: form.is_shared,
         gallery: gallery
       };
 
@@ -311,6 +314,19 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
             <button onClick={addGalleryItem} className="btn btn-light mb-3" type="button">
               + Add Image
             </button>
+
+            <div className="form-check mb-3">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="editProgramIsShared"
+                checked={form.is_shared}
+                onChange={(e) => setField("is_shared", e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="editProgramIsShared">
+                Allow teams in other companies to schedule this program
+              </label>
+            </div>
 
             {/* Chips de asignadas */}
             <h3 className="fw-semibold mt-4 mb-2">Assigned Activities</h3>

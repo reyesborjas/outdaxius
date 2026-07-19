@@ -21,10 +21,10 @@ export default function Schedules() {
   const fetchSchedules = async () => {
     try {
       const [progSchedRes, actSchedRes, progRes, actRes] = await Promise.all([
-        fetch(`${API}/program-schedules/`, {
+        fetch(`${API}/program-schedules/?mine_only=true`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch(`${API}/activity-schedules/`, {
+        fetch(`${API}/activity-schedules/?mine_only=true`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
         fetch(`${API}/programs/`, {
@@ -93,9 +93,10 @@ export default function Schedules() {
   return (
     <div className="min-vh-100 d-flex flex-column bg-surface-light">
       <main className="flex-grow-1 container-lg px-3 py-4">
-        <div className="d-flex justify-content-between align-items-center mb-4">
+        <div className="d-flex justify-content-between align-items-center mb-1">
           <h2 className="text-h1">Schedules</h2>
         </div>
+        <p className="text-muted mb-4">Showing schedules created by your team or company.</p>
 
         {error && <p className="text-state-danger">{error}</p>}
 

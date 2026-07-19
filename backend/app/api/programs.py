@@ -30,6 +30,7 @@ class ProgramUpdate(BaseModel):
     gallery: Optional[List[dict]] = None
     min_activities: Optional[int] = None
     guide_leader: Optional[uuid.UUID] = None
+    is_shared: Optional[bool] = None
     # agregar otros campos relevantes
 
 # ---------- Endpoints ----------
@@ -85,6 +86,7 @@ def create_program(
         guide_leader=guide_leader_id,  # 🔥 NUEVO
         gallery=payload.gallery or [],
         team_id=membership.team_id,
+        is_shared=payload.is_shared,
     )
     db.add(prog)
     db.commit()

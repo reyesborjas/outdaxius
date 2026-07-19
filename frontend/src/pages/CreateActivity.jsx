@@ -32,6 +32,7 @@ export default function CreateActivity() {
     activity_type: "",
     location_id: null,
     guide_leader: null,
+    is_shared: false,
   });
   const [gallery, setGallery] = useState([]);
   const [error, setError] = useState("");
@@ -204,11 +205,13 @@ const guideOptions = guides.map(g => ({
     }
 
     try {
-      const payload = { 
+      const payload = {
         title: form.title,
         description: form.description,
         activity_type: form.activity_type,
         location_id: form.location_id,
+        guide_leader: form.guide_leader,
+        is_shared: form.is_shared,
         gallery: gallery
       };
 
@@ -261,6 +264,8 @@ const guideOptions = guides.map(g => ({
         description: "",
         activity_type: types.length > 0 ? types[0].id : "",
         location_id: null,
+        guide_leader: null,
+        is_shared: false,
       });
       setGallery([]);
       setStep(1);
@@ -519,6 +524,19 @@ const guideOptions = guides.map(g => ({
               <button onClick={addGalleryItem} className="btn btn-outline-primary mb-4">
                 + Add Image
               </button>
+
+              <div className="form-check mb-4">
+                <input
+                  type="checkbox"
+                  className="form-check-input"
+                  id="activityIsShared"
+                  checked={form.is_shared}
+                  onChange={(e) => setField("is_shared", e.target.checked)}
+                />
+                <label className="form-check-label" htmlFor="activityIsShared">
+                  Allow teams in other companies to schedule this activity
+                </label>
+              </div>
 
               <div className="d-flex gap-2">
                 <button className="btn btn-secondary" onClick={() => setStep(2)}>

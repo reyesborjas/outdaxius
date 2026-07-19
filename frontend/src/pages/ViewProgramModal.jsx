@@ -262,7 +262,7 @@ export default function ViewProgramModal({ program, onClose }) {
                           <div className="pe-3 text-truncate">
                             <div className="fw-semibold text-truncate">{a.title}</div>
                             <div className="small text-muted text-truncate">
-                              {a.activity_type || "–"}
+                              {a.type?.type_name || "–"}
                               {a.location?.display_name ? ` · ${a.location.display_name}` : ""}
                             </div>
                           </div>
@@ -483,7 +483,10 @@ export default function ViewProgramModal({ program, onClose }) {
             )}
           </div>
 
-          <div className="modal-footer">
+          <div className="modal-footer d-flex justify-content-between align-items-center">
+            <span className="small text-muted">
+              By {program?.creator?.display_name || program?.creator?.email || "Unknown"}
+            </span>
             <button onClick={onClose} className="btn btn-secondary">
               Close
             </button>

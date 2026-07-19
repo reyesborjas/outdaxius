@@ -59,7 +59,7 @@ export default function ProgramsGrid({ asCarousel = false }) {
               style={{ background: "linear-gradient(180deg,transparent,rgba(0,0,0,0.55))", borderBottomLeftRadius: 16, borderBottomRightRadius: 16 }}
             >
               <div className="fw-semibold text-truncate">{items[idx]?.title}</div>
-              <div className="small text-truncate">{items[idx]?.program_type || "Program"}</div>
+              <div className="small text-truncate">{items[idx]?.type?.type_name || "Program"}</div>
             </div>
           </div>
           <img
@@ -91,7 +91,7 @@ export default function ProgramsGrid({ asCarousel = false }) {
             )}
             <div className="p-2">
               <div className="fw-semibold text-truncate">{p.title}</div>
-              <div className="small text-muted text-truncate">{p.program_type || "Program"}</div>
+              <div className="small text-muted text-truncate">{p.type?.type_name || "Program"}</div>
               <div className="small text-truncate" style={{ lineHeight: "1.25" }}>
                 {p.description || "—"}
               </div>

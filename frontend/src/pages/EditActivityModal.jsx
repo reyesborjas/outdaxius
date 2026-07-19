@@ -10,6 +10,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
     description: activity?.description || "",
     activity_type: activity?.activity_type || "exploration",
     location_id: activity?.location_id || null,
+    is_shared: !!activity?.is_shared,
   });
   const [gallery, setGallery] = useState(activity?.gallery || []);
   const [error, setError] = useState("");
@@ -22,6 +23,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
       description: activity.description ?? "",
       activity_type: activity.type?.type_name ?? "exploration",
       location_id: activity.location_id ?? null,
+      is_shared: !!activity.is_shared,
     });
     setGallery(Array.isArray(activity.gallery) ? activity.gallery : []);
   }, [activity]);
@@ -112,6 +114,19 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
               </div>
             ))}
             <button onClick={addGalleryItem} className="btn btn-light mb-3">+ Add Image</button>
+
+            <div className="form-check mb-3">
+              <input
+                type="checkbox"
+                className="form-check-input"
+                id="editActivityIsShared"
+                checked={form.is_shared}
+                onChange={(e) => setField("is_shared", e.target.checked)}
+              />
+              <label className="form-check-label" htmlFor="editActivityIsShared">
+                Allow teams in other companies to schedule this activity
+              </label>
+            </div>
           </div>
           <div className="modal-footer">
             <button onClick={onClose} className="btn btn-secondary">Cancel</button>
