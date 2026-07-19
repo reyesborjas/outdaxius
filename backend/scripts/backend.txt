@@ -1,0 +1,4286 @@
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\__init__.py =====
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\__init__.py =====
+﻿# backend/app/api/__init__.py
+# Este archivo no es usado por la app principal. Usar backend/app/api/routes/__init__.py para el agregador de rutas.
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\activities.py =====
+# app/api/activities.py
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import or_, func
+from typing import List, Optional
+import uuid
+from pydantic import BaseModel, Field
+
+from app.db.session import get_db
+from app.models.location import Location
+from app.models.activity import Activity
+from app.models.types import Types
+from app.models.user import User
+from app.schemas.activity import ActivityCreate, ActivityOut
+from app.api.deps import get_current_user
+
+router = APIRouter()
+
+# ---------- Schemas ----------
+class ActivityUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    activity_type: Optional[uuid.UUID] = None
+    gallery: Optional[List[dict]] = None
+    location_id: Optional[uuid.UUID] = None
+    guide_leader: Optional[uuid.UUID] = None 
+
+# ---------- Helper function ----------
+def normalize_gallery(gallery):
+    """Normaliza gallery si viene como lista de strings"""
+    if not gallery:
+        return []
+    if isinstance(gallery, list):
+        result = []
+        for i, item in enumerate(gallery):
+            if isinstance(item, str):
+                result.append({"url": item, "tag": "", "position": i})
+            elif isinstance(item, dict):
+                result.append({
+                    "url": item.get("url", ""),
+                    "tag": item.get("tag", ""),
+                    "position": item.get("position", i)
+                })
+        return result
+    return []
+
+# ---------- Endpoints ----------
+
+@router.get("/", response_model=List[ActivityOut])
+def list_activities(db: Session = Depends(get_db)):
+    """
+    Listar todas las actividades, incluyendo relaciones: location, type, creator.
+    """
+    items = (
+        db.query(Activity)
+        .options(
+            selectinload(Activity.location),
+            selectinload(Activity.type),  # ✅ Cargar type
+            selectinload(Activity.creator),
+            selectinload(Activity.leader),
+        )
+        .all()
+    )
+    
+    for a in items:
+        a.gallery = normalize_gallery(a.gallery)
+    
+    return items
+
+
+@router.get("/search", response_model=List[ActivityOut])
+def search_activities(q: str, db: Session = Depends(get_db)):
+    """
+    Buscar actividades por título, descripción o tipo.
+    """
+    query = f"%{q.lower()}%"
+    items = (
+        db.query(Activity)
+        .options(
+            selectinload(Activity.location),
+            selectinload(Activity.type),  # ✅ Cargar type
+            selectinload(Activity.creator),
+            selectinload(Activity.leader),
+        )
+        .join(Types, Activity.activity_type == Types.id)
+        .filter(
+            or_(
+                func.lower(Activity.title).like(query),
+                func.lower(Activity.description).like(query),
+                func.lower(Types.type_name).like(query)
+            )
+        )
+        .all()
+    )
+    
+    for a in items:
+        a.gallery = normalize_gallery(a.gallery)
+    
+    return items
+
+
+@router.get("/{activity_id}", response_model=ActivityOut)
+def get_activity(activity_id: uuid.UUID, db: Session = Depends(get_db)):
+    """
+    Obtiene una actividad por ID, incluyendo relaciones: location, type, creator.
+    """
+    activity = (
+        db.query(Activity)
+        .options(
+            selectinload(Activity.location),
+            selectinload(Activity.type),  # ✅ Cargar type
+            selectinload(Activity.creator),
+            selectinload(Activity.leader),
+        )
+        .filter(Activity.id == activity_id)
+        .first()
+    )
+    
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    
+    activity.gallery = normalize_gallery(activity.gallery)
+    return activity
+
+
+@router.post("/", response_model=ActivityOut, status_code=status.HTTP_201_CREATED)
+def create_activity(
+    payload: ActivityCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Crea una nueva actividad validando location, type y asignando created_by.
+    """
+    print(f"Received payload: {payload.dict()}")
+    
+    # Valida que location_id exista
+    location = db.query(Location).filter(Location.id == payload.location_id).first()
+    if not location:
+        raise HTTPException(status_code=404, detail="Location not found")
+    
+    # Valida que el activity_type exista
+    act_type = db.query(Types).filter(Types.id == payload.activity_type).first()
+    if not act_type:
+        raise HTTPException(status_code=404, detail="Activity type not found")
+    
+    # Si se proporciona guide_leader, validar que existe
+    guide_leader_id = payload.guide_leader if payload.guide_leader else current_user.id
+    
+    if payload.guide_leader:
+        leader = db.query(User).filter(User.id == payload.guide_leader).first()
+        if not leader:
+            raise HTTPException(status_code=404, detail="Guide leader not found")
+    
+    # Normaliza la galería
+    normalized_gallery = normalize_gallery(payload.gallery)
+    
+    # Crea la actividad
+    act = Activity(
+        title=payload.title,
+        description=payload.description,
+        activity_type=payload.activity_type,
+        location_id=payload.location_id,
+        gallery=normalized_gallery,
+        created_by=current_user.id,
+        guide_leader=guide_leader_id
+    )
+    
+    db.add(act)
+    db.commit()
+    db.refresh(act)
+
+    # Cargar las relaciones explícitamente
+    act = (
+        db.query(Activity)
+        .options(
+            selectinload(Activity.location),
+            selectinload(Activity.type),  # ✅ Cargar type
+            selectinload(Activity.creator),
+            selectinload(Activity.leader),
+        )
+        .filter(Activity.id == act.id)
+        .first()
+    )
+    
+    return act
+
+@router.put("/{activity_id}", response_model=ActivityOut)
+def update_activity(
+    activity_id: uuid.UUID,
+    payload: ActivityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Actualiza una actividad existente.
+    """
+    activity = db.query(Activity).filter(Activity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    
+    if current_user.role != "admin" and activity.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    
+    # Actualiza solo los campos proporcionados
+    update_data = payload.dict(exclude_unset=True)
+    
+    if "activity_type" in update_data and update_data["activity_type"]:
+        type_obj = db.query(Types).filter(Types.id == update_data["activity_type"]).first()
+        if not type_obj:
+            raise HTTPException(status_code=404, detail="Type not found")
+    
+    if "guide_leader" in update_data and update_data["guide_leader"]:
+        leader = db.query(User).filter(User.id == update_data["guide_leader"]).first()
+        if not leader:
+            raise HTTPException(status_code=404, detail="Guide leader not found")
+    
+    if "gallery" in update_data:
+        update_data["gallery"] = normalize_gallery(update_data["gallery"])
+    
+    for field, value in update_data.items():
+        setattr(activity, field, value)
+    
+    activity.updated_at = func.now()
+    db.commit()
+    db.refresh(activity)
+    
+    # Recargar con relaciones
+    activity = (
+        db.query(Activity)
+        .options(
+            selectinload(Activity.location),
+            selectinload(Activity.type),  # ✅ Cargar type
+            selectinload(Activity.creator),
+            selectinload(Activity.leader),
+        )
+        .filter(Activity.id == activity_id)
+        .first()
+    )
+    
+    return activity
+
+@router.delete("/{activity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_activity(
+    activity_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Elimina una actividad (solo admin o creador).
+    """
+    activity = db.query(Activity).filter(Activity.id == activity_id).first()
+    if not activity:
+        raise HTTPException(status_code=404, detail="Activity not found")
+    
+    if current_user.role != "admin" and activity.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    
+    db.delete(activity)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\activity_schedules.py =====
+# app/api/activity_schedules.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+import uuid
+from typing import List
+from app.db.session import get_db
+from app.models.activity_schedule import ActivitySchedule
+from app.schemas.activity_schedule import ActivityScheduleCreate, ActivityScheduleOut
+from app.api.deps import get_current_user
+from app.models.user import User
+from app.models.program_schedule import ProgramSchedule
+from app.models.programactivity import ProgramActivity
+
+router = APIRouter()
+
+@router.get("/", response_model=List[ActivityScheduleOut])
+def list_activity_schedules(
+    db: Session = Depends(get_db),
+    activity_id: uuid.UUID | None = None
+):
+    q = db.query(ActivitySchedule)
+    if activity_id:
+        q = q.filter(ActivitySchedule.activity_id == activity_id)
+    return q.distinct(ActivitySchedule.id).all()
+
+@router.post("/", response_model=ActivityScheduleOut, status_code=status.HTTP_201_CREATED)
+def create_activity_schedule(
+    payload: ActivityScheduleCreate,
+    db: Session = Depends(get_db),
+    current: User = Depends(get_current_user)
+):
+    if payload.program_schedule_id is None:
+        sched = ActivitySchedule(**payload.model_dump())
+        db.add(sched)
+        db.commit()
+        db.refresh(sched)
+        return sched
+
+    parent = db.query(ProgramSchedule).filter(ProgramSchedule.id == payload.program_schedule_id).first()
+    if not parent:
+        raise HTTPException(404, "Parent program schedule not found")
+
+    exists = db.query(ProgramActivity).filter(
+        ProgramActivity.program_id == parent.program_id,
+        ProgramActivity.activity_id == payload.activity_id
+    ).first()
+    if not exists:
+        raise HTTPException(400, "Activity is not part of the parent program")
+
+    if not (parent.start_time <= payload.start_time <= parent.end_time and
+            parent.start_time <= payload.end_time <= parent.end_time):
+        raise HTTPException(400, "Activity schedule must be inside program schedule window")
+
+    sched = ActivitySchedule(**payload.model_dump())
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return sched
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\auth.py =====
+# app/api/auth.py
+from fastapi import APIRouter, Depends, HTTPException, Request, status
+from sqlalchemy.orm import Session
+from pydantic import BaseModel, EmailStr, Field
+from typing import Literal, Optional, Any, Dict
+from datetime import datetime, timedelta, timezone
+
+from app.db.session import get_db
+from app.models.user import User
+from app.schemas.user import UserOut
+from app.core.security import (
+    get_password_hash, verify_password,
+    create_token, decode_token, rotate_refresh,
+)
+
+router = APIRouter()
+
+# ======== Rate limiting e intentos ========
+FAILED_WINDOW = timedelta(minutes=15)
+LOCK_MINUTES = 15
+MAX_FAILED = 5
+
+_failed_map = {}  # key -> list[datetime]
+_locked_until = {}  # key -> datetime
+
+def _key(req: Request, email: str) -> str:
+    ip = req.client.host if req.client else "unknown"
+    return f"{ip}|{email.lower()}"
+
+def _is_locked(k: str) -> Optional[datetime]:
+    u = _locked_until.get(k)
+    if u and u > datetime.now(timezone.utc):
+        return u
+    _locked_until.pop(k, None)
+    return None
+
+def _register_fail(k: str):
+    now = datetime.now(timezone.utc)
+    arr = [t for t in _failed_map.get(k, []) if now - t <= FAILED_WINDOW]
+    arr.append(now)
+    _failed_map[k] = arr
+    if len(arr) >= MAX_FAILED:
+        _locked_until[k] = now + timedelta(minutes=LOCK_MINUTES)
+        _failed_map[k] = []
+
+def _clear_fail(k: str):
+    _failed_map.pop(k, None)
+    _locked_until.pop(k, None)
+
+# ======== Schemas ========
+class RegisterIn(BaseModel):
+    email: EmailStr
+    password: str = Field(min_length=8)
+    display_name: str
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    role: Literal["user", "guide"] = "user"
+    # Optional guide fields
+    passport_number: Optional[str] = None
+    phone: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    # Company guide fields
+    tax_id: Optional[str] = None
+    fiscal_data: Optional[Dict[str, Any]] = None
+
+class LoginIn(BaseModel):
+    email: EmailStr
+    password: str
+
+class LoginOut(BaseModel):
+    access_token: str
+    refresh_token: str
+    token_type: str = "bearer"
+    user: UserOut
+
+class RefreshIn(BaseModel):
+    refresh_token: str
+
+class PasswordResetRequestIn(BaseModel):
+    email: EmailStr
+
+class PasswordResetIn(BaseModel):
+    token: str
+    new_password: str = Field(min_length=8)
+
+# ======== Register ========
+@router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def register(payload: RegisterIn, db: Session = Depends(get_db)):
+    if db.query(User).filter(User.email == payload.email).first():
+        raise HTTPException(status_code=400, detail="Email already exists")
+
+    # Validate company guide requirements
+    if payload.role == "guide":
+        has_fiscal = payload.fiscal_data and isinstance(payload.fiscal_data, dict)
+        has_tax_id = payload.tax_id and isinstance(payload.tax_id, str) and len(payload.tax_id.strip()) > 0
+        
+        if has_fiscal or has_tax_id:
+            # Company guide: require both tax_id and fiscal_data
+            if not has_tax_id:
+                raise HTTPException(status_code=422, detail="tax_id is required for company guides")
+            if not has_fiscal:
+                raise HTTPException(status_code=422, detail="fiscal_data is required for company guides")
+            
+            # Validate fiscal_data structure (minimal check)
+            fd = payload.fiscal_data
+            if not fd.get("tax_identification", {}).get("primary_identification_number"):
+                raise HTTPException(
+                    status_code=422,
+                    detail="fiscal_data.tax_identification.primary_identification_number is required"
+                )
+
+    user = User(
+        display_name=payload.display_name,
+        email=payload.email,
+        password_hash=get_password_hash(payload.password),
+        role=payload.role,
+        first_name=payload.first_name,
+        last_name=payload.last_name,
+        passport_number=payload.passport_number,
+        phone=payload.phone,
+        tax_id=payload.tax_id,
+        profile=payload.profile or {},
+        fiscal_data=payload.fiscal_data or {},
+        birth_date=None,
+        preferred_language="en",
+        is_active=True,
+    )
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+# ======== Login con rate-limit ========
+@router.post("/login", response_model=LoginOut)
+def login(data: LoginIn, request: Request, db: Session = Depends(get_db)):
+    k = _key(request, data.email)
+    locked = _is_locked(k)
+    if locked:
+        remaining = int((locked - datetime.now(timezone.utc)).total_seconds() // 60) + 1
+        raise HTTPException(status_code=429, detail=f"Demasiados intentos. Intenta en ~{remaining} min")
+
+    user = db.query(User).filter(User.email == data.email).first()
+    if not user or not verify_password(data.password, user.password_hash):
+        _register_fail(k)
+        raise HTTPException(status_code=401, detail="Incorrect email or password")
+
+    _clear_fail(k)
+    sub = {"sub": str(user.id), "email": user.email, "role": user.role}
+    access = create_token(sub, kind="access")
+    refresh = create_token(sub, kind="refresh")
+    return {"access_token": access, "refresh_token": refresh, "token_type": "bearer", "user": user}
+
+# ======== Refresh con rotación ========
+@router.post("/refresh")
+def refresh_token(payload: RefreshIn):
+    new_refresh = rotate_refresh(payload.refresh_token)
+    claims = decode_token(new_refresh, expected="refresh")
+    sub = {k: claims[k] for k in ("sub", "email", "role")}
+    new_access = create_token(sub, kind="access")
+    return {"access_token": new_access, "refresh_token": new_refresh}
+
+# ======== Password recovery ========
+@router.post("/request-password-reset")
+def request_password_reset(payload: PasswordResetRequestIn, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.email == payload.email).first()
+    if user:
+        sub = {"sub": str(user.id), "email": user.email}
+        token = create_token(sub, kind="reset")
+        # TODO: enviar email con el token
+        return {"status": "ok", "token_preview": token[:24]}
+    return {"status": "ok"}
+
+@router.post("/reset-password")
+def reset_password(payload: PasswordResetIn, db: Session = Depends(get_db)):
+    claims = decode_token(payload.token, expected="reset")
+    uid = claims.get("sub")
+    user = db.query(User).filter(User.id == uid).first()
+    if not user:
+        raise HTTPException(status_code=400, detail="Token inválido")
+    user.password_hash = get_password_hash(payload.new_password)
+    db.add(user)
+    db.commit()
+    return {"status": "ok"}
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\booking.py =====
+# app/api/booking.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+import uuid
+from typing import List
+from app.db.session import get_db
+from app.api.deps import get_current_user
+from app.models.user import User
+from app.models.booking import Booking
+from app.schemas.booking import BookingCreate, BookingOut
+from app.models.activity_schedule import ActivitySchedule
+from app.models.program_schedule import ProgramSchedule
+from app.models.payment import Payment
+from app.schemas.payment import PaymentCreate, PaymentOut
+from datetime import datetime, timedelta
+
+router = APIRouter()
+
+@router.get("/", response_model=List[BookingOut])
+def list_bookings(db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    return db.query(Booking).filter(Booking.user_id == current.id).all()
+
+@router.post("/", response_model=BookingOut, status_code=status.HTTP_201_CREATED)
+def create_booking(payload: BookingCreate, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    act_id = payload.activity_schedule_id
+    prog_id = payload.program_schedule_id
+    if bool(act_id) == bool(prog_id):
+        raise HTTPException(400, "Provide exactly one of activity_schedule_id or program_schedule_id")
+
+    participants = [p.model_dump() for p in payload.participants]
+    seats_requested = len(participants)
+
+    if act_id:
+        sched = db.query(ActivitySchedule).filter(ActivitySchedule.id == act_id).first()
+        if not sched:
+            raise HTTPException(404, "Activity schedule not found")
+
+        exists = db.query(Booking).filter(
+            Booking.user_id == current.id,
+            Booking.activity_schedule_id == act_id
+        ).first()
+        if exists:
+            raise HTTPException(409, "User already has a booking for this activity schedule")
+
+        max_cap = sched.max_participants
+        if max_cap is None and sched.program_schedule_id:
+            parent = db.query(ProgramSchedule).filter(ProgramSchedule.id == sched.program_schedule_id).first()
+            max_cap = parent.max_participants if parent else None
+
+        if max_cap is not None:
+            used = db.query(func.coalesce(func.sum(Booking.participants_count), 0)).filter(
+                Booking.activity_schedule_id == act_id
+            ).scalar()
+            if seats_requested + used > max_cap:
+                raise HTTPException(400, f"Not enough seats. Remaining: {max_cap - used}")
+
+        booking = Booking(
+            user_id=current.id,
+            activity_schedule_id=sched.id,
+            program_schedule_id=sched.program_schedule_id,
+            status="pending",
+            participants_count=seats_requested,
+            participants=participants,
+        )
+        db.add(booking)
+        db.commit()
+        db.refresh(booking)
+        return booking
+
+    parent = db.query(ProgramSchedule).filter(ProgramSchedule.id == prog_id).first()
+    if not parent:
+        raise HTTPException(404, "Program schedule not found")
+
+    exists = db.query(Booking).filter(
+        Booking.user_id == current.id,
+        Booking.program_schedule_id == prog_id
+    ).first()
+    if exists:
+        raise HTTPException(409, "User already has a booking for this program schedule")
+
+    max_cap = parent.max_participants
+    if max_cap is not None:
+        used = db.query(func.coalesce(func.sum(Booking.participants_count), 0)).filter(
+            Booking.program_schedule_id == prog_id
+        ).scalar()
+        if seats_requested + used > max_cap:
+            raise HTTPException(400, f"Not enough seats. Remaining: {max_cap - used}")
+
+    booking = Booking(
+        user_id=current.id,
+        program_schedule_id=parent.id,
+        status="pending",
+        participants_count=seats_requested,
+        participants=participants,
+    )
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+@router.get("/{booking_id}", response_model=BookingOut)
+def get_booking(booking_id: uuid.UUID, db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current.id).first()
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    return b
+
+@router.post("/{booking_id}/pay", response_model=PaymentOut, status_code=status.HTTP_201_CREATED)
+def submit_payment(booking_id: uuid.UUID, payload: PaymentCreate,
+                   db: Session = Depends(get_db), current: User = Depends(get_current_user)):
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current.id).first()
+    if not b:
+        raise HTTPException(404, "Booking not found")
+
+    if b.status == "cancelled":
+        raise HTTPException(400, "Cancelled booking cannot be paid")
+
+    # Crea pago con estado pending y voucher_url (imagen de comprobante)
+    p = Payment(
+        booking_id=b.id,
+        amount=payload.amount,
+        currency=payload.currency or "USD",
+        status="pending",
+        voucher_url=str(payload.voucher_url) if payload.voucher_url else None,
+        reference=payload.reference,
+    )
+    db.add(p)
+    # Para el MVP, al enviar comprobante, marcamos el booking como "confirmed".
+    b.status = "confirmed"
+    db.add(b)
+    db.commit()
+    db.refresh(p)
+    return p
+
+@router.post("/{booking_id}/confirm-payment", response_model=BookingOut)
+def confirm_payment(booking_id: uuid.UUID,
+                    db: Session = Depends(get_db),
+                    current: User = Depends(get_current_user)):
+    # Simplificación: el mismo usuario puede confirmar. En producción: restringir a admin/operador.
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current.id).first()
+    if not b:
+        raise HTTPException(404, "Booking not found")
+    if b.status == "cancelled":
+        raise HTTPException(400, "Cannot confirm a cancelled booking")
+
+    b.status = "confirmed"
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return b
+
+@router.post("/{booking_id}/cancel", response_model=BookingOut)
+def cancel_booking(booking_id: uuid.UUID,
+                   db: Session = Depends(get_db),
+                   current: User = Depends(get_current_user)):
+    b = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current.id).first()
+    if not b:
+        raise HTTPException(404, "Booking not found")
+
+    if b.status == "cancelled":
+        return b  # idempotente
+
+    # Regla MVP: se puede cancelar siempre. En producción: ventana temporal y política de fee.
+    b.status = "cancelled"
+    db.add(b)
+    db.commit()
+    db.refresh(b)
+    return b
+
+CANCELLATION_WINDOW_HOURS = 48
+DEFAULT_CANCELLATION_FEE = 20.00  # ejemplo en USD
+
+@router.post("/booking/{booking_id}/cancel", response_model=BookingOut)
+def cancel_booking(booking_id: uuid.UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    booking = db.query(Booking).filter(Booking.id == booking_id, Booking.userid == current_user.id).first()
+    if not booking:
+        raise HTTPException(status_code=404, detail="Booking not found")
+    if booking.status == "cancelled":
+        return booking  # idempotencia
+
+    # Buscar el horario de inicio relacionado
+    schedule = db.query(ActivitySchedule).filter(ActivitySchedule.id == booking.activityscheduleid).first()
+    if not schedule:
+        raise HTTPException(status_code=404, detail="Schedule not found")
+
+    # Calcular ventana de cancelación
+    now = datetime.utcnow()
+    window_limit = schedule.starttime - timedelta(hours=CANCELLATION_WINDOW_HOURS)
+    if now > window_limit:
+        booking.cancellation_fee = DEFAULT_CANCELLATION_FEE
+    else:
+        booking.cancellation_fee = 0
+    
+    booking.status = "cancelled"
+    booking.cancelled_at = now
+    db.add(booking)
+    db.commit()
+    db.refresh(booking)
+    return booking
+
+@router.patch("/bookings/{booking_id}/participants/{participant_id}")
+def edit_participant(booking_id: uuid.UUID, participant_id: str, updates: dict, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    booking = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current_user.id).first()
+    if not booking:
+        raise HTTPException(404, "Booking not found")
+    updated = False
+    for participant in booking.participants:
+        if participant['id'] == participant_id:
+            participant.update(updates)
+            updated = True
+            # Log de auditoría aquí con los datos viejos y nuevos
+    if updated:
+        db.commit()
+    else:
+        raise HTTPException(404, "Participant not found")
+    return booking
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\company.py =====
+# app/api/company.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from uuid import UUID
+from app.models.team import Team, Team
+from app.db.session import get_db
+from app.models.company import Company
+from app.models.companymember import CompanyMember
+from app.models.user import User
+from app.schemas.company import (
+    CompanyCreate, CompanyOut, CompanyUpdate, 
+    CompanyWithMembers, LicenseInfo
+)
+from app.schemas.companymember import CompanyMemberOut
+from app.schemas.invitation import (
+    InvitationCreate, InvitationOut, InvitationAccept, InvitationListOut
+)
+from app.api.deps import get_current_user
+from app.services.licensing import LicenseManager
+from app.services.invitations import InvitationManager
+from pydantic import BaseModel
+from datetime import datetime
+from typing import Optional
+from pydantic import ConfigDict
+from app.api.teams import Team, TeamMember
+
+
+router = APIRouter(prefix="/companies", tags=["companies"])
+
+# ============================================================================
+# COMPANY CRUD
+# ============================================================================
+
+@router.post("", response_model=CompanyOut, status_code=status.HTTP_201_CREATED)
+def create_company(
+    company: CompanyCreate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Create a new company (admin or guide only)"""
+    if current_user.role not in ["admin", "guide"]:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only guides and admins can create companies"
+        )
+    
+    db_company = Company(**company.dict(), createdby=current_user.id)
+    db.add(db_company)
+    db.commit()
+    db.refresh(db_company)
+    
+    # Add creator as admin member
+    member = CompanyMember(
+        companyid=db_company.id,
+        userid=current_user.id,
+        position="Owner",
+        is_admin=True,
+        is_active=True
+    )
+    db.add(member)
+    db.commit()
+    
+    return db_company
+
+@router.get("/{company_id}", response_model=CompanyWithMembers)
+def get_company(
+    company_id: UUID, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get company details with members"""
+    db_company = db.query(Company).filter(Company.id == company_id).first()
+    if not db_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Check if user has access
+    if current_user.role != "admin":
+        is_member = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this company"
+            )
+    members = db.query(CompanyMember).filter(
+        CompanyMember.companyid == company_id
+    ).all()
+    
+    # Enriquecer con datos del usuario
+    enriched_members = []
+    for member in members:
+        user = db.query(User).filter(User.id == member.userid).first()
+        member_dict = {
+            "id": member.id,
+            "companyid": member.companyid,
+            "userid": member.userid,
+            "position": member.position,
+            "is_admin": member.is_admin,
+            "is_active": member.is_active,
+            "joinedat": member.joinedat,
+            # Datos del usuario
+            "user_display_name": user.display_name if user else None,
+            "user_email": user.email if user else None,
+            "user_full_name": f"{user.first_name or ''} {user.last_name or ''}".strip() if user else None,
+        }
+        enriched_members.append(member_dict)
+    # Get license info
+    license_info = LicenseManager.get_company_license_info(db, company_id)
+    
+    result = CompanyWithMembers.from_orm(db_company)
+    result.current_guides_count = license_info['current_guides']
+    result.can_add_guides = license_info['can_add_guides']
+    
+    return result
+
+@router.get("", response_model=List[CompanyOut])
+def list_companies(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    if current_user.role == "admin":
+        return db.query(Company).all()
+    memberships = db.query(CompanyMember).filter(
+        CompanyMember.userid == current_user.id,
+        CompanyMember.is_active == True
+    ).all()
+    company_ids = [m.companyid for m in memberships]
+    return db.query(Company).filter(Company.id.in_(company_ids)).all()
+
+@router.put("/{company_id}", response_model=CompanyOut)
+def update_company(
+    company_id: UUID, 
+    company: CompanyUpdate, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update company (admin members only)"""
+    db_company = db.query(Company).filter(Company.id == company_id).first()
+    if not db_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Check if user is admin of company
+    if current_user.role != "admin":
+        is_admin = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_admin == True,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only company admins can update"
+            )
+    
+    for key, value in company.dict(exclude_unset=True).items():
+        setattr(db_company, key, value)
+    
+    db.commit()
+    db.refresh(db_company)
+    return db_company
+
+# ============================================================================
+# LICENSING
+# ============================================================================
+
+@router.get("/{company_id}/license", response_model=LicenseInfo)
+def get_license_info(
+    company_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Get company license information"""
+    # Verify access
+    if current_user.role != "admin":
+        is_member = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this company"
+            )
+    
+    try:
+        info = LicenseManager.get_company_license_info(db, company_id)
+        return LicenseInfo(**info)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+# ============================================================================
+# INVITATIONS
+# ============================================================================
+
+@router.post("/{company_id}/invitations", response_model=InvitationOut)
+def create_invitation(
+    company_id: UUID,
+    invitation: InvitationCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create guide invitation for company
+    
+    - Only company admins can create invitations
+    - Validates license limits
+    - Email is sent to invited guide (TODO)
+    """
+    
+    # Verify admin permission
+    if current_user.role != "admin":
+        is_admin = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_admin == True,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only company admins can invite guides"
+            )
+    
+    # Validate license
+    from app.services.licensing import LicenseManager
+    try:
+        LicenseManager.validate_license(db, company_id)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_402_PAYMENT_REQUIRED,
+            detail=str(e)
+        )
+    
+    # Create invitation
+    try:
+        inv = InvitationManager.create_invitation(
+            db=db,
+            company_id=company_id,
+            invited_email=invitation.invited_email,
+            created_by=current_user.id,
+            expires_in_days=invitation.expires_in_days
+        )
+        db.commit()
+        db.refresh(inv)
+        
+        # TODO: Send email
+        # send_invitation_email(
+        #     to=inv.invited_email,
+        #     link=f"{FRONTEND_URL}/accept-invitation?code={inv.code}",
+        #     company_name=inv.company.name
+        # )
+        
+        return inv
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/invitations/accept", response_model=dict)
+def accept_invitation(
+    data: InvitationAccept,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Accept company invitation
+    
+    - User must be logged in as guide
+    - Email must match invitation
+    - Creates company_members record
+    """
+    
+    try:
+        member = InvitationManager.accept_invitation(
+            db=db,
+            code=data.code,
+            user_id=current_user.id
+        )
+        db.commit()
+        db.refresh(member)
+        
+        return {
+            "status": "success",
+            "message": "Welcome to the company!",
+            "company_id": str(member.companyid),
+            "position": member.position
+        }
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+    
+@router.get("/{company_id}/invitations", response_model=List[InvitationListOut])
+def list_invitations(
+    company_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List company invitations (admin members only)"""
+    
+    # Check access
+    if current_user.role != "admin":
+        is_admin = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_admin == True,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only company admins can view invitations"
+            )
+    
+    from app.models.invitation import InvitationCode
+    invitations = db.query(InvitationCode).filter(
+        InvitationCode.company_id == company_id
+    ).order_by(InvitationCode.created_at.desc()).all()
+    
+    return invitations
+
+@router.post("/invitations/accept", response_model=CompanyMemberOut)
+def accept_invitation(
+    data: InvitationAccept,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Accept invitation to join company"""
+    
+    try:
+        member = InvitationManager.accept_invitation(
+            db=db,
+            code=data.code,
+            user_id=current_user.id
+        )
+        db.commit()
+        db.refresh(member)
+        return member
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+# ============================================================================
+# MEMBERS MANAGEMENT
+# ============================================================================
+
+@router.get("/{company_id}/members", response_model=List[CompanyMemberOut])
+def list_company_members(
+    company_id: UUID, 
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List company members"""
+    
+    # Check access
+    if current_user.role != "admin":
+        is_member = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this company"
+            )
+    
+    return db.query(CompanyMember).filter(
+        CompanyMember.companyid == company_id
+    ).all()
+
+@router.delete("/{company_id}/members/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_member(
+    company_id: UUID,
+    user_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Remove member from company (admin only)"""
+    
+    # Check if current user is admin
+    if current_user.role != "admin":
+        is_admin = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_admin == True,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only company admins can remove members"
+            )
+    
+    # Prevent removing owner
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if company.createdby == user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot remove company owner"
+        )
+    
+    # Find and deactivate member
+    member = db.query(CompanyMember).filter(
+        CompanyMember.companyid == company_id,
+        CompanyMember.userid == user_id
+    ).first()
+    
+    if not member:
+        raise HTTPException(status_code=404, detail="Member not found")
+    
+    member.is_active = False
+    db.commit()
+    
+    return None
+
+class TeamCreate(BaseModel):
+    name: str
+
+# app/api/company.py
+# ... [código anterior permanece igual hasta MEMBERS MANAGEMENT] ...
+
+# ============================================================================
+# TEAMS MANAGEMENT
+# ============================================================================
+
+from pydantic import BaseModel, Field
+
+class TeamCreateRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=200)
+    description: Optional[str] = None
+
+class TeamMemberAdd(BaseModel):
+    user_id: UUID
+
+class TeamMemberRoleUpdate(BaseModel):
+    team_role: str
+
+class TeamOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str]
+    created_by: UUID
+    company_id: UUID
+    created_at: datetime
+    member_count: int = 0
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class TeamMemberOut(BaseModel):
+    id: UUID
+    team_id: UUID
+    user_id: UUID
+    team_role: str
+    joined_at: datetime
+    user_email: Optional[str] = None
+    user_name: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+
+@router.post("/{company_id}/teams", response_model=TeamOut, status_code=status.HTTP_201_CREATED)
+def create_team(
+    company_id: UUID,
+    payload: TeamCreateRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Create a new team within a company.
+    Only company admins can create teams.
+    Creator is automatically added as team admin.
+    """
+    
+    # Verify company exists and user is admin
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    
+    # Check admin permission
+    if current_user.role != "admin":
+        is_admin = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_admin == True,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only company admins can create teams"
+            )
+    
+    # Create team
+    team = Team(
+        name=payload.name,
+        description=payload.description,
+        created_by=current_user.id,
+        company_id=company_id
+    )
+    db.add(team)
+    db.flush()
+    
+    # Add creator as team admin
+    team_member = TeamMember(
+        team_id=team.id,
+        user_id=current_user.id,
+        team_role="admin"
+    )
+    db.add(team_member)
+    db.commit()
+    db.refresh(team)
+    
+    # Count members
+    member_count = db.query(TeamMember).filter(TeamMember.team_id == team.id).count()
+    
+    team_out = TeamOut.model_validate(team)
+    team_out.member_count = member_count
+    
+    return team_out
+
+
+@router.get("/{company_id}/teams", response_model=List[TeamOut])
+def list_teams(
+    company_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all teams in a company"""
+    
+    # Verify access
+    if current_user.role != "admin":
+        is_member = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this company"
+            )
+    
+    teams = db.query(Team).filter(Team.company_id == company_id).all()
+    
+    result = []
+    for team in teams:
+        member_count = db.query(TeamMember).filter(TeamMember.team_id == team.id).count()
+        team_out = TeamOut.model_validate(team)
+        team_out.member_count = member_count
+        result.append(team_out)
+    
+    return result
+
+
+@router.get("/{company_id}/teams/{team_id}/members", response_model=List[TeamMemberOut])
+def list_team_members(
+    company_id: UUID,
+    team_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """List all members of a team"""
+    
+    # Verify team belongs to company
+    team = db.query(Team).filter(
+        Team.id == team_id,
+        Team.company_id == company_id
+    ).first()
+    
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Verify access
+    if current_user.role != "admin":
+        is_member = db.query(CompanyMember).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.userid == current_user.id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if not is_member:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Not a member of this company"
+            )
+    
+    members = db.query(TeamMember).filter(TeamMember.team_id == team_id).all()
+    
+    result = []
+    for member in members:
+        user = db.query(User).filter(User.id == member.user_id).first()
+        member_out = TeamMemberOut.model_validate(member)
+        if user:
+            member_out.user_email = user.email
+            member_out.user_name = user.display_name or f"{user.first_name} {user.last_name}".strip()
+        result.append(member_out)
+    
+    return result
+
+
+@router.post("/{company_id}/teams/{team_id}/members", status_code=status.HTTP_201_CREATED)
+def add_team_member(
+    company_id: UUID,
+    team_id: UUID,
+    payload: TeamMemberAdd,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Add a member to a team.
+    User must be a guide in the company.
+    Only team admins can add members.
+    """
+    
+    # Verify team belongs to company
+    team = db.query(Team).filter(
+        Team.id == team_id,
+        Team.company_id == company_id
+    ).first()
+    
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Check if current user is team admin
+    if current_user.role != "admin":
+        is_team_admin = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == current_user.id,
+            TeamMember.team_role == "admin"
+        ).first()
+        
+        if not is_team_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only team admins can add members"
+            )
+    
+    # Verify user is a guide in the company
+    company_member = db.query(CompanyMember).filter(
+        CompanyMember.companyid == company_id,
+        CompanyMember.userid == payload.user_id,
+        CompanyMember.is_active == True
+    ).first()
+    
+    if not company_member:
+        raise HTTPException(
+            status_code=400,
+            detail="User must be an active member of the company"
+        )
+    
+    user = db.query(User).filter(User.id == payload.user_id).first()
+    if not user or user.role != "guide":
+        raise HTTPException(
+            status_code=400,
+            detail="User must have guide role"
+        )
+    
+    # Check if already a member
+    existing = db.query(TeamMember).filter(
+        TeamMember.team_id == team_id,
+        TeamMember.user_id == payload.user_id
+    ).first()
+    
+    if existing:
+        raise HTTPException(
+            status_code=400,
+            detail="User is already a team member"
+        )
+    
+    # Add member
+    team_member = TeamMember(
+        team_id=team_id,
+        user_id=payload.user_id,
+        team_role="day_guide"
+    )
+    db.add(team_member)
+    db.commit()
+    db.refresh(team_member)
+    
+    return {"status": "success", "member_id": str(team_member.id)}
+
+
+@router.patch("/{company_id}/teams/{team_id}/members/{member_id}/role")
+def update_member_role(
+    company_id: UUID,
+    team_id: UUID,
+    member_id: UUID,
+    payload: TeamMemberRoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Update a team member's role. Only team admins can update roles."""
+    
+    ALLOWED_ROLES = {"admin", "lead_guide", "expert_guide", "assistant_guide", "day_guide"}
+    
+    if payload.team_role not in ALLOWED_ROLES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid role. Must be one of: {', '.join(ALLOWED_ROLES)}"
+        )
+    
+    # Verify team belongs to company
+    team = db.query(Team).filter(
+        Team.id == team_id,
+        Team.company_id == company_id
+    ).first()
+    
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Check if current user is team admin
+    if current_user.role != "admin":
+        is_team_admin = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == current_user.id,
+            TeamMember.team_role == "admin"
+        ).first()
+        
+        if not is_team_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only team admins can update roles"
+            )
+    
+    # Find member
+    member = db.query(TeamMember).filter(
+        TeamMember.id == member_id,
+        TeamMember.team_id == team_id
+    ).first()
+    
+    if not member:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    
+    member.team_role = payload.team_role
+    db.commit()
+    
+    return {"status": "success", "user_id": str(member.user_id), "new_role": payload.team_role}
+
+
+@router.delete("/{company_id}/teams/{team_id}/members/{member_id}", status_code=status.HTTP_204_NO_CONTENT)
+def remove_team_member(
+    company_id: UUID,
+    team_id: UUID,
+    member_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """Remove a member from a team. Only team admins can remove members."""
+    
+    # Verify team belongs to company
+    team = db.query(Team).filter(
+        Team.id == team_id,
+        Team.company_id == company_id
+    ).first()
+    
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+    
+    # Check if current user is team admin
+    if current_user.role != "admin":
+        is_team_admin = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.user_id == current_user.id,
+            TeamMember.team_role == "admin"
+        ).first()
+        
+        if not is_team_admin:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only team admins can remove members"
+            )
+    
+    # Find member
+    member = db.query(TeamMember).filter(
+        TeamMember.id == member_id,
+        TeamMember.team_id == team_id
+    ).first()
+    
+    if not member:
+        raise HTTPException(status_code=404, detail="Team member not found")
+    
+    # Prevent removing the last admin
+    if member.team_role == "admin":
+        admin_count = db.query(TeamMember).filter(
+            TeamMember.team_id == team_id,
+            TeamMember.team_role == "admin"
+        ).count()
+        
+        if admin_count <= 1:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot remove the last admin from the team"
+            )
+    
+    db.delete(member)
+    db.commit()
+    
+    return None
+
+@router.get("/{company_id}/teams", response_model=List[dict])
+def list_teams_for_company(company_id: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    teams = db.query(Team).filter_by(company_id=company_id).all()
+    return [{"id": str(team.id), "name": team.name, "company_id": str(team.company_id)} for team in teams]
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\companymember.py =====
+# app/api/companymember.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from uuid import UUID
+
+from app.db.session import get_db
+from app.models.companymember import CompanyMember
+from app.schemas.companymember import CompanyMemberCreate, CompanyMemberOut, CompanyMemberBase
+
+router = APIRouter(prefix="/companymembers", tags=["companymembers"])
+
+# POST /companymembers
+@router.post("/", response_model=CompanyMemberOut, status_code=status.HTTP_201_CREATED)
+def create_company_member(member: CompanyMemberCreate, db: Session = Depends(get_db)):
+    db_member = CompanyMember(**member.dict())
+    db.add(db_member)
+    db.commit()
+    db.refresh(db_member)
+    return db_member
+
+# GET /companymembers/{id}
+@router.get("/{id}", response_model=CompanyMemberOut)
+def get_company_member(id: UUID, db: Session = Depends(get_db)):
+    db_member = db.query(CompanyMember).filter(CompanyMember.id == id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="Company member not found")
+    return db_member
+
+# GET /companymembers
+@router.get("/", response_model=List[CompanyMemberOut])
+def list_company_members(db: Session = Depends(get_db)):
+    return db.query(CompanyMember).all()
+
+# PUT /companymembers/{id}
+@router.put("/{id}", response_model=CompanyMemberOut)
+def update_company_member(id: UUID, member: CompanyMemberBase, db: Session = Depends(get_db)):
+    db_member = db.query(CompanyMember).filter(CompanyMember.id == id).first()
+    if not db_member:
+        raise HTTPException(status_code=404, detail="Company member not found")
+    for key, value in member.dict(exclude_unset=True).items():
+        setattr(db_member, key, value)
+    db.commit()
+    db.refresh(db_member)
+    return db_member
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\deps.py =====
+# backend/app/api/deps.py
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy.orm import Session
+from jose import jwt, JWTError
+from app.db.session import get_db
+from app.db.config import SECRET_KEY, ALGORITHM
+from app.models.user import User
+
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
+
+def get_current_user(db: Session = Depends(get_db), token: str = Depends(oauth2_scheme)) -> User:
+    credentials_exception = HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Could not validate credentials")
+    try:
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id: str = payload.get("sub")
+        if user_id is None:
+            raise credentials_exception
+    except JWTError:
+        raise credentials_exception
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user or not user.is_active:
+        raise credentials_exception
+    return user
+
+def require_role(required: set):
+    def dependency(current_user: User = Depends(get_current_user)):
+        if current_user.role not in required:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Insufficient role")
+        return current_user
+    return dependency
+
+def require_admin(current_user: User = Depends(get_current_user)):
+    if current_user.role != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin-only")
+    return current_user
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\locations.py =====
+# backend/app/api/locations.py
+from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from typing import List, Optional, Tuple
+from urllib.parse import urlparse, parse_qs
+from pydantic import BaseModel
+import re
+import requests
+
+from app.db.session import get_db
+from app.models.location import Location
+from app.schemas.location import LocationOut, LocationResolveIn
+
+router = APIRouter()
+UA = {"User-Agent": "outdaxius/1.0 (support@outdaxius.local)"}
+NOMINATIM = "https://nominatim.openstreetmap.org"
+
+# ---------- Inbound models (local, sin depender de schemas pydantic globales) ----------
+class LocationCreateIn(BaseModel):
+    display_name: str
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    plus_code: Optional[str] = None
+    google_maps_url: Optional[str] = None
+
+class LocationUpsertByName(BaseModel):
+    display_name: str
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+    plus_code: Optional[str] = None
+    google_maps_url: Optional[str] = None
+
+# ---------- Helpers ----------
+def _strip_lower(s: Optional[str]) -> str:
+    return (s or "").strip().lower()
+
+def _extract_latlon_from_gmaps(url: str) -> Tuple[Optional[float], Optional[float]]:
+    try:
+        u = urlparse(url)
+        m = re.search(r"@(-?\d+\.\d+),(-?\d+\.\d+),", u.path)
+        if m:
+            return float(m.group(1)), float(m.group(2))
+        q = parse_qs(u.query).get("q", [])
+        if q:
+            parts = q[0].split(",")
+            if len(parts) >= 2:
+                return float(parts[0]), float(parts[1])
+    except Exception:
+        pass
+    return None, None
+
+def _nominatim_search(name: str):
+    r = requests.get(
+        f"{NOMINATIM}/search",
+        params={"q": name, "format": "jsonv2", "limit": 1},
+        headers=UA, timeout=10,
+    )
+    r.raise_for_status()
+    js = r.json()
+    return js[0] if js else None
+
+def _nominatim_reverse(lat: float, lon: float):
+    r = requests.get(
+        f"{NOMINATIM}/reverse",
+        params={"lat": lat, "lon": lon, "format": "jsonv2"},
+        headers=UA, timeout=10,
+    )
+    r.raise_for_status()
+    return r.json()
+
+def _nearby(db: Session, name: Optional[str], lat: Optional[float], lon: Optional[float]) -> Optional[Location]:
+    tol = 0.00055  # ~60 m
+    if name:
+        by_name = db.query(Location).filter(func.lower(Location.display_name) == name.lower()).first()
+        if by_name:
+            return by_name
+    if lat is not None and lon is not None:
+        return db.query(Location).filter(
+            Location.lat.between(lat - tol, lat + tol),
+            Location.lon.between(lon - tol, lon + tol),
+        ).first()
+    return None
+
+def _upsert_location(db: Session, *, name: str, lat: float, lon: float,
+                     source: str, gmaps: Optional[str], osm_id: Optional[int]) -> Location:
+    found = _nearby(db, name, lat, lon)
+    if found:
+        changed = False
+        if gmaps and not found.google_maps_url:
+            found.google_maps_url = gmaps; changed = True
+        if osm_id and not found.osm_id:
+            found.osm_id = osm_id; changed = True
+        if source and found.source == "manual":
+            found.source = source; changed = True
+        if changed:
+            db.flush()
+        return found
+    loc = Location(
+        display_name=name, lat=lat, lon=lon,
+        source=source, osm_id=osm_id, google_maps_url=gmaps
+    )
+    db.add(loc); db.flush()
+    return loc
+
+# ---------- Endpoints ----------
+@router.get("/", response_model=List[LocationOut])
+def list_locations(db: Session = Depends(get_db)):
+    return db.query(Location).order_by(Location.display_name.asc()).all()
+
+@router.get("/search", response_model=List[LocationOut])
+def search_locations(q: str = Query(..., min_length=2), db: Session = Depends(get_db)):
+    qn = f"%{_strip_lower(q)}%"
+    return (
+        db.query(Location)
+        .filter(func.lower(Location.display_name).like(qn))
+        .order_by(Location.display_name.asc())
+        .limit(50)
+        .all()
+    )
+
+@router.post("/", response_model=LocationOut, status_code=status.HTTP_201_CREATED)
+def create_location(payload: LocationCreateIn, db: Session = Depends(get_db)):
+    name = (payload.display_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="display_name is required")
+
+    # dedupe por nombre
+    existing = (
+        db.query(Location)
+        .filter(func.lower(Location.display_name) == name.lower())
+        .first()
+    )
+    # dedupe por lat/lon/url si vienen
+    if not existing and (payload.lat is not None and payload.lon is not None):
+        existing = _nearby(db, None, float(payload.lat), float(payload.lon))
+    if not existing and payload.google_maps_url:
+        existing = (
+            db.query(Location)
+            .filter(Location.google_maps_url == payload.google_maps_url)
+            .first()
+        )
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Location already exists")
+
+    loc = Location(
+        display_name=name,
+        lat=float(payload.lat) if payload.lat is not None else 0.0,
+        lon=float(payload.lon) if payload.lon is not None else 0.0,
+        google_maps_url=payload.google_maps_url,
+        # plus_code se mantiene si tu modelo lo tiene; si no, ignora
+        # plus_code=payload.plus_code,
+        source="manual",
+    )
+    db.add(loc)
+    db.commit()
+    db.refresh(loc)
+    return loc
+
+@router.post("/upsert-by-name", response_model=LocationOut)
+def upsert_location_by_name(payload: LocationUpsertByName, db: Session = Depends(get_db)):
+    name = (payload.display_name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="display_name is required")
+
+    loc = (
+        db.query(Location)
+        .filter(func.lower(Location.display_name) == name.lower())
+        .first()
+    )
+    if loc:
+        changed = False
+        if payload.lat is not None and (loc.lat is None or loc.lat == 0):
+            loc.lat = float(payload.lat); changed = True
+        if payload.lon is not None and (loc.lon is None or loc.lon == 0):
+            loc.lon = float(payload.lon); changed = True
+        if payload.google_maps_url and not loc.google_maps_url:
+            loc.google_maps_url = payload.google_maps_url; changed = True
+        # if payload.plus_code and not loc.plus_code: loc.plus_code = payload.plus_code; changed = True
+        if changed:
+            db.commit(); db.refresh(loc)
+        return loc
+
+    loc = Location(
+        display_name=name,
+        lat=float(payload.lat) if payload.lat is not None else 0.0,
+        lon=float(payload.lon) if payload.lon is not None else 0.0,
+        google_maps_url=payload.google_maps_url,
+        # plus_code=payload.plus_code,
+        source="manual",
+    )
+    db.add(loc)
+    db.commit()
+    db.refresh(loc)
+    return loc
+
+@router.post("/resolve", response_model=LocationOut, status_code=status.HTTP_201_CREATED)
+def resolve_location(payload: LocationResolveIn, db: Session = Depends(get_db)):
+    name = (payload.display_name or "").strip() or None
+    lat, lon = payload.lat, payload.lon
+    gmaps = payload.google_maps_url
+
+    if (lat is None or lon is None) and gmaps:
+        glat, glon = _extract_latlon_from_gmaps(gmaps)
+        lat = lat or glat
+        lon = lon or glon
+
+    osm_id = None
+    source = "manual"
+
+    if (lat is None or lon is None) and name:
+        hit = _nominatim_search(name)
+        if hit:
+            lat = float(hit["lat"]); lon = float(hit["lon"])
+            osm_id = int(hit.get("osm_id") or 0) or None
+            name = hit.get("display_name") or name
+            source = "osm"
+
+    if name is None and (lat is not None and lon is not None):
+        rev = _nominatim_reverse(lat, lon)
+        disp = rev.get("display_name")
+        osm_id = int(rev.get("osm_id") or 0) or None
+        name = disp or f"{lat},{lon}"
+        source = "osm" if disp else "manual"
+
+    if name is None or lat is None or lon is None:
+        raise HTTPException(status_code=422, detail="Insufficient location data")
+
+    loc = _upsert_location(db, name=name, lat=float(lat), lon=float(lon),
+                           source=source, gmaps=gmaps, osm_id=osm_id)
+    db.commit(); db.refresh(loc)
+    return loc
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\program_schedules.py =====
+# backend/app/api/program_schedules.py
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.api.deps import get_current_user
+from app.models.programs import Program
+from app.models.program_schedule import ProgramSchedule
+from app.schemas.program_schedule import ProgramScheduleCreate, ProgramScheduleOut
+from app.models.user import User
+from typing import List
+import uuid
+
+router = APIRouter()
+
+@router.post("/", response_model=ProgramScheduleOut, status_code=201)
+def create_program_schedule(
+    payload: ProgramScheduleCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    program = db.query(Program).get(payload.program_id)
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+
+    sched = ProgramSchedule(
+        program_id=payload.program_id,
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        price=payload.price,
+        status="pending",
+    )
+    db.add(sched)
+    db.commit()
+    db.refresh(sched)
+    return sched
+
+@router.get("/", response_model=List[ProgramScheduleOut])
+def list_program_schedules(
+    db: Session = Depends(get_db),
+    program_id: uuid.UUID | None = None
+):
+    q = db.query(ProgramSchedule)
+    if program_id:
+        q = q.filter(ProgramSchedule.program_id == program_id)
+    return q.distinct(ProgramSchedule.id).all()
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\programs.py =====
+# app/api/pograms.py
+from fastapi import APIRouter, Depends, HTTPException, status, Response
+from sqlalchemy.orm import Session, selectinload
+from sqlalchemy import or_, func
+from typing import List, Optional
+import uuid
+from uuid import UUID
+from app.db.session import get_db
+from app.models.programs import Program
+from app.models.types import Types
+from app.models.user import User
+from app.schemas.program import ProgramCreate, ProgramOut
+from app.api.deps import get_current_user
+from pydantic import BaseModel
+from app.schemas.activity import ActivityOut
+from app.models.activity import Activity
+from app.models.programactivity import ProgramActivity
+
+
+
+router = APIRouter()
+
+# ---------- Schemas ----------
+class ProgramUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
+    program_type: Optional[uuid.UUID] = None
+    gallery: Optional[List[dict]] = None
+    min_activities: Optional[int] = None
+    guide_leader: Optional[uuid.UUID] = None
+    # agregar otros campos relevantes
+
+# ---------- Endpoints ----------
+@router.get("", response_model=List[ProgramOut])
+@router.get("/", response_model=List[ProgramOut])
+def list_programs(db: Session = Depends(get_db)):
+    items = (
+        db.query(Program)
+        .options(
+            selectinload(Program.creator),
+            selectinload(Program.type)  # cargar el type vinculado
+        )
+        .all()
+    )
+
+    # Normaliza gallery si viene como ["url1","url2",...]
+    for p in items:
+        g = p.gallery
+        if isinstance(g, list) and (len(g) == 0 or (len(g) > 0 and isinstance(g[0], str))):
+            p.gallery = [{"url": u, "tag": "", "position": i} for i, u in enumerate(g or [])]
+    return items
+
+@router.post("/", response_model=ProgramOut, status_code=status.HTTP_201_CREATED)
+def create_program(
+    payload: ProgramCreate,
+    db: Session = Depends(get_db),
+    user: User = Depends(get_current_user)
+):
+    type_obj = db.query(Types).filter(Types.id == payload.program_type).first()
+    if not type_obj:
+        raise HTTPException(status_code=404, detail="Type not found")
+
+    # 🔥 NUEVO: Si se proporciona guide_leader, validar que existe
+    guide_leader_id = payload.guide_leader if payload.guide_leader else user.id
+    
+    if payload.guide_leader:
+        leader = db.query(User).filter(User.id == payload.guide_leader).first()
+        if not leader:
+            raise HTTPException(status_code=404, detail="Guide leader not found")
+
+    prog = Program(
+        title=payload.title,
+        description=payload.description,
+        program_type=payload.program_type,
+        created_by=user.id,
+        guide_leader=guide_leader_id,  # 🔥 NUEVO
+        gallery=payload.gallery or [],
+    )
+    db.add(prog) 
+    db.commit() 
+    db.refresh(prog)    
+    db.refresh(prog, ['creator', 'type', 'leader'])  
+    return prog
+
+@router.put("/{program_id}", response_model=ProgramOut)
+def update_program(
+    program_id: uuid.UUID,
+    payload: ProgramUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    if current_user.role != "admin" and program.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    
+    update_data = payload.dict(exclude_unset=True)
+    
+    if "program_type" in update_data and update_data["program_type"]:
+        type_obj = db.query(Types).filter(Types.id == update_data["program_type"]).first()
+        if not type_obj:
+            raise HTTPException(status_code=404, detail="Type not found")
+    
+    # 🔥 NUEVO: Validar guide_leader si se proporciona
+    if "guide_leader" in update_data and update_data["guide_leader"]:
+        leader = db.query(User).filter(User.id == update_data["guide_leader"]).first()
+        if not leader:
+            raise HTTPException(status_code=404, detail="Guide leader not found")
+    
+    for field, value in update_data.items():
+        setattr(program, field, value)
+    
+    program.updated_at = func.now()
+    db.commit()
+    db.refresh(program, ['creator', 'type', 'leader'])  # 🔥 NUEVO: agregar 'leader'
+    return program
+
+@router.delete("/{program_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_program(
+    program_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    p = db.query(Program).filter(Program.id == program_id).first()
+    if not p:
+        raise HTTPException(status_code=404, detail="Program not found")
+    if current_user.role != "admin" and p.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed")
+    db.delete(p)
+    db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+@router.get("/search", response_model=List[ProgramOut])
+def search_programs(q: str, db: Session = Depends(get_db)):
+    q = (q or "").strip().lower()
+    if not q:
+        return []
+    like = f"%{q}%"
+    return (
+        db.query(Program)
+        .outerjoin(Types, Program.program_type == Types.id)
+        .filter(
+            or_(
+                func.lower(Program.title).like(like),
+                func.lower(Types.type_name).like(like),
+            )
+        )
+        .all()
+    )
+@router.get("/{program_id}/activities", response_model=list[ActivityOut])
+def get_program_activities(program_id: UUID, db: Session = Depends(get_db)):
+    program = db.query(Program).options(selectinload(Program.activities)).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    return program.activities
+
+@router.post("/{program_id}/activities", status_code=status.HTTP_201_CREATED)
+def link_activities_to_program(
+    program_id: UUID,
+    activity_ids: List[UUID],
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Vincular múltiples actividades a un programa
+    """
+    # Verificar que el programa existe
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    
+    # Verificar permisos
+    if current_user.role != "admin" and program.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed to modify this program")
+    
+    # Verificar que todas las actividades existen
+    activities = db.query(Activity).filter(Activity.id.in_(activity_ids)).all()
+    found_ids = {a.id for a in activities}
+    missing_ids = set(activity_ids) - found_ids
+    
+    if missing_ids:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Activities not found: {', '.join(str(id) for id in missing_ids)}"
+        )
+    
+    # Crear vínculos (evitando duplicados)
+    created_count = 0
+    for activity_id in activity_ids:
+        # Verificar si ya existe el vínculo
+        existing = db.query(ProgramActivity).filter(
+            ProgramActivity.program_id == program_id,
+            ProgramActivity.activity_id == activity_id
+        ).first()
+        
+        if not existing:
+            link = ProgramActivity(
+                program_id=program_id,
+                activity_id=activity_id
+            )
+            db.add(link)
+            created_count += 1
+    
+    db.commit()
+    
+    return {
+        "status": "ok",
+        "program_id": str(program_id),
+        "linked_count": created_count,
+        "total_activities": len(activity_ids)
+    }
+
+# 🔥 NUEVO: Desvincular una actividad de un programa
+@router.delete("/{program_id}/activities/{activity_id}", status_code=status.HTTP_204_NO_CONTENT)
+def unlink_activity_from_program(
+    program_id: UUID,
+    activity_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Desvincular una actividad de un programa
+    """
+    # Verificar que el programa existe
+    program = db.query(Program).filter(Program.id == program_id).first()
+    if not program:
+        raise HTTPException(status_code=404, detail="Program not found")
+    
+    # Verificar permisos
+    if current_user.role != "admin" and program.created_by != current_user.id:
+        raise HTTPException(status_code=403, detail="Not allowed to modify this program")
+    
+    # Buscar y eliminar el vínculo
+    link = db.query(ProgramActivity).filter(
+        ProgramActivity.program_id == program_id,
+        ProgramActivity.activity_id == activity_id
+    ).first()
+    
+    if not link:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Activity {activity_id} is not linked to program {program_id}"
+        )
+    
+    db.delete(link)
+    db.commit()
+    
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\roles.py =====
+# backeend/api/roles.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List, Optional
+from uuid import UUID
+from app.db.session import get_db
+from app.models.user import UserRole, User
+
+
+router = APIRouter(tags=["roles"])
+
+@router.get("/", response_model=List[str])
+def list_roles():
+    # Retorna todos los roles disponibles
+    return [role.value for role in UserRole]
+
+@router.post("/assign", status_code=status.HTTP_200_OK)
+def assign_role(userid: UUID, role: str, db: Session = Depends(get_db)):
+    user = db.query(User).filter(User.id == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if role not in [r.value for r in UserRole]:
+        raise HTTPException(status_code=400, detail="Invalid role")
+    user.role = role
+    db.commit()
+    db.refresh(user)
+    return {"status": "ok", "userid": str(userid), "role": role}
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\routes\__init__.py =====
+# backend/app/api/routes/__init__.py
+from fastapi import APIRouter
+
+from app.api.locations import router as locations_router
+from app.api.activities import router as activities_router
+from app.api.users import router as users_router
+from app.api.programs import router as programs_router
+from app.api.roles import router as roles_router
+from app.api.company import router as company_router  # ✅ CRÍTICO: Verificar esta línea
+from app.api import auth
+from app.api import program_schedules, activity_schedules
+from app.api import booking
+from app.api import types
+
+router = APIRouter()
+
+# Core routers
+router.include_router(locations_router, prefix="/locations", tags=["locations"])
+router.include_router(activities_router, prefix="/activities", tags=["activities"])
+router.include_router(users_router, prefix="/users", tags=["users"])
+router.include_router(programs_router, prefix="/programs", tags=["programs"])
+router.include_router(types.router, prefix="/types", tags=["types"]) 
+
+# ✅ CRÍTICO: Esta línea debe estar presente
+router.include_router(company_router)
+
+# New schedule structure
+router.include_router(program_schedules.router, prefix="/program-schedules", tags=["program-schedules"])
+router.include_router(activity_schedules.router, prefix="/activity-schedules", tags=["activity-schedules"])
+
+# Other modules
+router.include_router(auth.router, prefix="/auth", tags=["auth"])
+router.include_router(booking.router, prefix="/bookings", tags=["bookings"])
+router.include_router(roles_router, prefix="/roles", tags=["roles"])
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\teams.py =====
+# app/api/teams.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import List
+from uuid import UUID
+from app.db.session import get_db
+from app.api.deps import get_current_user
+from app.models.team import Team, TeamMember
+from app.models.companymember import CompanyMember
+from app.models.user import User
+
+router = APIRouter(prefix="/teams", tags=["teams"])
+
+# Esquema para inputs
+from pydantic import BaseModel
+
+class TeamCreate(BaseModel):
+    name: str
+    description: str = ""
+
+class TeamMemberAssign(BaseModel):
+    userid: UUID
+
+# Crear equipo y adicionar admin actual (company.createdby) como team member
+@router.post("/", response_model=dict, status_code=status.HTTP_201_CREATED)
+def create_team(company_id: UUID, payload: TeamCreate, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1. Validar que el usuario sea admin en la empresa
+    company_member = db.query(CompanyMember).filter(
+        CompanyMember.companyid == company_id,
+        CompanyMember.userid == current_user.id,
+        CompanyMember.isadmin == True,
+        CompanyMember.isactive == True
+    ).first()
+    if not company_member:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 2. Crear el equipo
+    team = Team(
+        name=payload.name,
+        description=payload.description,
+        createdby=current_user.id,
+        companyid=company_id
+    )
+    db.add(team)
+    db.commit()
+    db.refresh(team)
+
+    # 3. Insertar al admin como miembro del equipo (TeamMember)
+    team_member = TeamMember(
+        teamid=team.id,
+        userid=current_user.id
+        # Otros campos por defecto (joinedat, etc.)
+    )
+    db.add(team_member)
+    db.commit()
+    db.refresh(team_member)
+
+    return {"id": str(team.id), "admin_member_id": str(team_member.id)}
+
+# Endpoint para añadir miembros al equipo solo si pertenecen a company_members
+@router.post("/{team_id}/members", response_model=dict)
+def add_team_member(team_id: UUID, assignment: TeamMemberAssign, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    # 1. Validar que el usuario autenticado es admin en la empresa del equipo
+    team = db.query(Team).filter(Team.id == team_id).first()
+    if not team:
+        raise HTTPException(status_code=404, detail="Team not found")
+
+    company_member = db.query(CompanyMember).filter(
+        CompanyMember.companyid == team.companyid,
+        CompanyMember.userid == current_user.id,
+        CompanyMember.isadmin == True,
+        CompanyMember.isactive == True
+    ).first()
+    if not company_member:
+        raise HTTPException(status_code=403, detail="Not authorized")
+
+    # 2. Validar que el usuario a añadir está en company_members
+    cmember = db.query(CompanyMember).filter(
+        CompanyMember.companyid == team.companyid,
+        CompanyMember.userid == assignment.userid,
+        CompanyMember.isactive == True
+    ).first()
+    if not cmember:
+        raise HTTPException(status_code=400, detail="User is not a member of company")
+
+    # 3. Evitar duplicados en el mismo equipo
+    existing = db.query(TeamMember).filter(
+        TeamMember.teamid == team.id,
+        TeamMember.userid == assignment.userid
+    ).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="User already in team")
+
+    # 4. Asignar a team
+    team_member = TeamMember(
+        teamid=team.id,
+        userid=assignment.userid
+        # joinedat y otros campos por defecto
+    )
+    db.add(team_member)
+    db.commit()
+    db.refresh(team_member)
+
+    return {"added_member_id": str(team_member.id)}
+
+class TeamMemberRoleUpdate(BaseModel):
+    team_role: str  # Validar valores en endpoint
+
+@router.put("/{team_id}/members/{user_id}/role", status_code=200)
+def update_team_member_role(
+    team_id: UUID,
+    user_id: UUID,
+    payload: TeamMemberRoleUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    # Validar que current_user tiene rol admin en este equipo
+    admin_membership = db.query(TeamMember).filter_by(
+        team_id=team_id, user_id=current_user.id, team_role='admin'
+    ).first()
+    if not admin_membership:
+        raise HTTPException(403, "Solo admin puede modificar roles")
+    # Validar valor de team_role
+    ALLOWED_ROLES = {"admin","lead_guide","expert_guide","assistant_guide","day_guide"}
+    if payload.team_role not in ALLOWED_ROLES:
+        raise HTTPException(400, f"Rol no permitido: {payload.team_role}")
+    # Actualizar rol
+    member = db.query(TeamMember).filter_by(team_id=team_id, user_id=user_id).first()
+    if not member:
+        raise HTTPException(404, "Miembro no existe")
+    member.team_role = payload.team_role
+    db.commit()
+    return {"status": "ok", "user_id": str(user_id), "new_role": payload.team_role}
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\types.py =====
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+from app.db.session import get_db
+from app.models.types import Types
+from app.schemas.types import TypesOut
+from uuid import UUID
+from typing import Optional
+from fastapi import Query
+
+router = APIRouter()
+
+@router.get("/", response_model=list[TypesOut])
+def list_types(
+    db: Session = Depends(get_db),
+    experience_type: Optional[str] = Query(None, description="Filter by experience_type: 'activity', 'program', or 'both'")
+):
+    """
+    Lista todos los tipos disponibles.
+    Filtra por experience_type si se proporciona.
+    """
+    query = db.query(Types)
+    
+    if experience_type:
+        # Si pide 'activity', traer los que son 'activity' o 'both'
+        if experience_type.lower() == "activity":
+            query = query.filter(Types.experience_type.in_(["activity", "both"]))
+        # Si pide 'program', traer los que son 'program' o 'both'
+        elif experience_type.lower() == "program":
+            query = query.filter(Types.experience_type.in_(["program", "both"]))
+        # Si pide 'both', traer solo los marcados como 'both'
+        elif experience_type.lower() == "both":
+            query = query.filter(Types.experience_type == "both")
+    
+    return query.order_by(Types.type_name).all()
+   
+
+@router.get("/{type_id}", response_model=TypesOut)
+def get_type(type_id: UUID, db: Session = Depends(get_db)):
+    """Obtiene un tipo específico por ID"""
+    type_obj = db.query(Types).filter(Types.id == type_id).first()
+    if not type_obj:
+        raise HTTPException(status_code=404, detail="Type not found")
+    return type_obj
+
+@router.post("/", response_model=TypesOut)
+def create_type(type_in: TypesOut, db: Session = Depends(get_db)):
+    type_obj = Types(**type_in.dict())
+    db.add(type_obj)
+    db.commit()
+    db.refresh(type_obj)
+    return type_obj
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\users.py =====
+# app/api/users.py
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from typing import Any, List, Optional, Union
+from uuid import UUID
+from pydantic import ConfigDict
+from app.db.session import get_db
+from app.models.user import User
+from app.schemas.user import UserUpdate, UserOut, UserWithCompanyOut, UserCreate
+from app.api.deps import get_current_user
+from app.schemas.user import UserCreate
+from app.api.deps import require_admin
+
+
+router = APIRouter()
+
+@router.patch("/me", response_model=UserOut)
+def update_me(
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> Any:
+    """
+    Permite al usuario autenticado actualizar solo sus propios datos.
+    Solo se actualizan los campos enviados (exclude_unset=True).
+    """
+    user = db.query(User).filter(User.id == current_user.id).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    for attr, value in payload.dict(exclude_unset=True).items():
+        setattr(user, attr, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.get("/", response_model=List[Union[UserOut, UserWithCompanyOut]])
+def list_users(
+    role: Optional[str] = None,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Lista usuarios. Si role=guide, enriquece con información de company.
+    """
+    if current_user.role not in {"admin", "company", "guide"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Insufficient permissions"
+        )
+    
+    query = db.query(User)
+    
+    if role:
+        query = query.filter(User.role == role)
+    
+    users = query.all()
+    
+    # ✅ Si se solicitan guides, enriquecer con info de company
+    if role == "guide":
+        from app.models.companymember import CompanyMember
+        from app.models.company import Company
+        
+        enriched_users = []
+        for user in users:
+            # Convertir a dict base
+            user_dict = {
+                "id": user.id,
+                "display_name": user.display_name,
+                "email": user.email,
+                "role": user.role,
+                "preferred_language": user.preferred_language,
+                "is_active": user.is_active,
+                "first_name": user.first_name,
+                "last_name": user.last_name,
+                "national_id": user.national_id,
+                "passport_number": user.passport_number,
+                "phone": user.phone,
+                "profile_picture": user.profile_picture,
+                "birth_date": user.birth_date,
+                "tax_id": user.tax_id,
+                "profile": user.profile,
+                "fiscal_data": user.fiscal_data,
+            }
+            
+            # Buscar membership activo
+            membership = db.query(CompanyMember).filter(
+                CompanyMember.userid == user.id,
+                CompanyMember.is_active == True
+            ).first()
+            
+            if membership:
+                company = db.query(Company).filter(
+                    Company.id == membership.companyid
+                ).first()
+                
+                if company:
+                    user_dict["company_name"] = company.name
+                    user_dict["company_id"] = company.id
+                    user_dict["is_company_admin"] = membership.is_admin
+                    user_dict["company_position"] = membership.position
+            
+            enriched_users.append(user_dict)
+        
+        return enriched_users
+    
+    # Para roles que no son guide, retornar sin enriquecimiento
+    return users
+
+@router.get("/me", response_model=UserOut)
+def get_me(current_user: User = Depends(get_current_user)):
+    return current_user
+
+@router.get("/me/company-info", response_model=dict)
+def get_my_company_info(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Obtiene información de empresa del guía:
+    - Si es miembro de una company formal: retorna datos de company table
+    - Si es independiente: retorna datos de user.fiscal_data
+    """
+    if current_user.role != "guide":
+        raise HTTPException(
+            status_code=403, 
+            detail="Only guides can access company info"
+        )
+    
+    from app.models.companymember import CompanyMember
+    from app.models.company import Company
+    
+    # Verificar si es miembro de una empresa formal
+    membership = db.query(CompanyMember).filter(
+        CompanyMember.userid == current_user.id,
+        CompanyMember.is_active == True
+    ).first()
+    
+    if membership:
+        # Guía asociado a empresa
+        company = db.query(Company).filter(
+            Company.id == membership.companyid
+        ).first()
+        return {
+            "type": "company_member",
+            "company_id": str(company.id),
+            "company_name": company.name,
+            "is_admin": membership.is_admin,
+            "position": membership.position,
+            "data": {
+                "legal_name": company.legal_name,
+                "trade_name": company.trade_name,
+                "country": company.country,
+                "address": company.address,
+            }
+        }
+    else:
+        # Guía independiente
+        return {
+            "type": "independent",
+            "company_id": None,
+            "company_name": None,
+            "data": current_user.fiscal_data or {}
+        }
+
+
+@router.get("/{userid}", response_model=UserOut)
+def get_user_by_id(userid: UUID, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    user = db.query(User).filter(User.id == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    if current_user.role != "admin" and current_user.id != userid:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    return user
+
+@router.post("/", response_model=UserOut, status_code=status.HTTP_201_CREATED)
+def create_user(
+    payload: UserCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    existing = db.query(User).filter(User.email == payload.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already exists")
+    user = User(**payload.dict())
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.patch("/{userid}", response_model=UserOut)
+def update_user(
+    userid: UUID, 
+    payload: UserUpdate, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(get_current_user)
+):
+    user = db.query(User).filter(User.id == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    # Admin can edit any user; others only themselves
+    if current_user.role != "admin" and current_user.id != userid:
+        raise HTTPException(status_code=403, detail="Permission denied")
+    for attr, value in payload.dict(exclude_unset=True).items():
+        setattr(user, attr, value)
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.delete("/{userid}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(
+    userid: UUID, 
+    db: Session = Depends(get_db), 
+    current_user: User = Depends(require_admin)
+):
+    user = db.query(User).filter(User.id == userid).first()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    db.delete(user)
+    db.commit()
+    return
+
+@router.get("/me/company-info", response_model=dict)
+def get_my_company_info(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Obtiene información de empresa del guía:
+    - Si es miembro de una company formal: retorna datos de company table
+    - Si es independiente: retorna datos de user.fiscal_data
+    """
+    if current_user.role != "guide":
+        raise HTTPException(status_code=403, detail="Only guides can access company info")
+    
+    from app.models.companymember import CompanyMember
+    from app.models.company import Company
+    
+    # Verificar si es miembro de una empresa formal
+    membership = db.query(CompanyMember).filter(
+        CompanyMember.userid == current_user.id,
+        CompanyMember.is_active == True
+    ).first()
+    
+    if membership:
+        # Guía asociado a empresa
+        company = db.query(Company).filter(Company.id == membership.companyid).first()
+        return {
+            "type": "company_member",
+            "company_id": str(company.id),
+            "company_name": company.name,
+            "is_admin": membership.is_admin,
+            "position": membership.position,
+            "data": {
+                "legal_name": company.legal_name,
+                "trade_name": company.trade_name,
+                "country": company.country,
+                "address": company.address,
+            }
+        }
+    else:
+        # Guía independiente
+        return {
+            "type": "independent",
+            "company_id": None,
+            "company_name": None,
+            "data": current_user.fiscal_data or {}
+        }
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\api\utils.py =====
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\core\security.py =====
+from datetime import datetime, timedelta, timezone
+from typing import Literal, Optional
+from uuid import uuid4
+
+from jose import jwt, JWTError
+from passlib.context import CryptContext
+
+from app.db.config import SECRET_KEY, ALGORITHM
+
+# Password hashing
+pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+def verify_password(plain_password: str, password_hash: str) -> bool:
+    return pwd_context.verify(plain_password, password_hash)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+# Token config
+ACCESS_MINUTES = 30
+REFRESH_DAYS = 15
+
+# Simple in-memory rotation store (replace with DB in producción)
+_invalidated_jti = set()
+
+def create_token(
+    data: dict,
+    *,
+    kind: Literal["access", "refresh", "reset"],
+    exp: Optional[timedelta] = None,
+) -> str:
+    to_encode = data.copy()
+    jti = str(uuid4())
+    now = datetime.now(timezone.utc)
+    if kind == "access":
+        expire = now + (exp or timedelta(minutes=ACCESS_MINUTES))
+    elif kind == "refresh":
+        expire = now + (exp or timedelta(days=REFRESH_DAYS))
+    elif kind == "reset":
+        expire = now + (exp or timedelta(hours=1))
+    else:
+        raise ValueError("invalid token kind")
+    to_encode.update({"exp": expire, "iat": now, "jti": jti, "typ": kind})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+
+def decode_token(token: str, *, expected: Optional[Literal["access","refresh","reset"]] = None) -> dict:
+    payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+    if payload.get("jti") in _invalidated_jti:
+        raise JWTError("token revoked")
+    if expected and payload.get("typ") != expected:
+        raise JWTError("unexpected token type")
+    return payload
+
+def rotate_refresh(old_token: str) -> str:
+    payload = decode_token(old_token, expected="refresh")
+    _invalidated_jti.add(payload["jti"])  # revoke old
+    # keep only minimal subject claims
+    sub = {k: payload[k] for k in ("sub", "email", "role") if k in payload}
+    return create_token(sub, kind="refresh")
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\db\__init__.py =====
+﻿
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\db\base.py =====
+# app/db/base.py
+from sqlalchemy.orm import declarative_base
+
+Base = declarative_base()
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\db\config.py =====
+﻿# app/db/config.py
+import os
+from dotenv import load_dotenv
+
+load_dotenv()  # loads variables from .env if present
+
+# === Database configuration ===
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql+psycopg2://postgres:123456789@localhost:5432/outdaxius_db"
+)
+
+# === JWT / Authentication ===
+SECRET_KEY = os.getenv("SECRET_KEY", "super_secret_for_jwt")  # 🔑 used for JWT tokens
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", 30))
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\db\session.py =====
+﻿# app/db/session.py
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from app.db.config import DATABASE_URL
+
+# Create engine
+engine = create_engine(DATABASE_URL, echo=True, future=True)
+
+# SessionLocal factory
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Dependency for FastAPI
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\main.py =====
+﻿# backend/app/main.py
+
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from starlette.responses import JSONResponse
+from starlette.middleware.base import BaseHTTPMiddleware
+
+from app.api.routes import router as apirouter  # Agrupador único recomendado
+
+app = FastAPI(title="Outdaxius API")  # <<< Instancia primero el objeto app
+
+origins = [
+    "http://localhost:5173",
+    "http://127.0.0.1:5173"
+]
+
+class CORSErrorFixMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request, call_next):
+        try:
+            response = await call_next(request)
+        except Exception as e:
+            response = JSONResponse({"detail": str(e)}, status_code=500)
+        response.headers["Access-Control-Allow-Origin"] = "*"
+        response.headers["Access-Control-Allow-Headers"] = "*"
+        response.headers["Access-Control-Allow-Methods"] = "*"
+        return response
+
+app.add_middleware(CORSErrorFixMiddleware)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# SEMÁNTICA CORRECTA: Incluye solo el agrupador principal, NO los routers individuales
+app.include_router(apirouter, prefix="/api")
+
+@app.get("/health")
+def health():
+    return {"status": "ok"}
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\__init__.py =====
+﻿# app/models/__init__.py
+
+from .user import User
+from .activity import Activity
+from .programs import Program
+from .programactivity import ProgramActivity
+from .activity_schedule import ActivitySchedule
+from .program_schedule import ProgramSchedule
+from .booking import Booking
+from .location import Location
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\activity.py =====
+# app/models/activity.py
+import uuid
+from sqlalchemy import Column, String, Text, ForeignKey, TIMESTAMP, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+class Activity(Base):
+    __tablename__ = "activities"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String, nullable=False)
+    description = Column(Text, nullable=True)
+    activity_type = Column(UUID(as_uuid=True), ForeignKey("types.id"), nullable=False)
+    type = relationship("Types", foreign_keys=[activity_type])
+   
+
+    # relaciones
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    location_id = Column(UUID(as_uuid=True), ForeignKey("locations.id"), nullable=True)
+    guide_leader = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+
+    # datos adicionales
+    gallery = Column(JSONB, nullable=False, server_default="[]")
+
+    # timestamps
+    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    # ORM relationships (sin importar schemas pydantic)
+    location = relationship("Location", back_populates="activities")
+    creator = relationship("User")
+    leader = relationship("User", foreign_keys=[guide_leader])
+
+    programs = relationship(
+    "Program",
+    secondary="programactivities",
+    back_populates="activities",
+)
+    activity_schedules = relationship(
+        "ActivitySchedule",
+        back_populates="activity",
+        cascade="all, delete-orphan",
+        passive_deletes=True,
+    )
+    type = relationship("Types", foreign_keys=[activity_type])
+    location = relationship("Location", back_populates="activities")
+    creator = relationship("User",foreign_keys=[created_by],back_populates="created_activities")  
+    leader = relationship("User",foreign_keys=[guide_leader],back_populates="led_activities")
+    programs = relationship("Program",secondary="programactivities",back_populates="activities",)
+    activity_schedules = relationship("ActivitySchedule",back_populates="activity",   cascade="all, delete-orphan",passive_deletes=True,)
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\activity_schedule.py =====
+# app/models/activity_schedule.py
+import uuid
+from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+
+
+class ActivitySchedule(Base):
+    __tablename__ = "activity_schedules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    activity_id = Column(UUID(as_uuid=True), ForeignKey("activities.id", ondelete="CASCADE"), nullable=False)
+    program_schedule_id = Column(UUID(as_uuid=True), ForeignKey("program_schedules.id", ondelete="CASCADE"), nullable=True)
+    start_time = Column(DateTime, nullable=False)
+    end_time   = Column(DateTime, nullable=False)
+    price      = Column(Numeric(10,2))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    activity = relationship("Activity", back_populates="activity_schedules")
+    program_schedule = relationship("ProgramSchedule", back_populates="activity_schedules")
+    status = Column(String, default="pending", nullable=False)
+    min_participants = Column(Integer, nullable=True)
+    max_participants = Column(Integer, nullable=True)
+    
+    
+      # valores: pending | confirmed | canceled
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\booking.py =====
+# app/models/booking.py
+import uuid
+from sqlalchemy import Column, ForeignKey, String, DateTime, Integer
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from sqlalchemy.sql import func
+from app.db.base import Base
+
+class Booking(Base):
+    __tablename__ = "bookings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"))
+
+    program_schedule_id  = Column(UUID(as_uuid=True), ForeignKey("program_schedules.id", ondelete="CASCADE"), nullable=True)
+    activity_schedule_id = Column(UUID(as_uuid=True), ForeignKey("activity_schedules.id", ondelete="CASCADE"), nullable=True)
+
+    status = Column(String, default="pending")          # pending | confirmed | cancelled
+    attendance_status = Column(String, nullable=True)   # attended | no-show
+
+    participants_count = Column(Integer, nullable=False, default=1)
+    # [{first_name,last_name,id_type,id_number,birth_date}]
+    participants = Column(JSONB, nullable=False, default=list)
+
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+    cancelled_at = Column(DateTime, nullable=True)
+    cancellation_fee = Column(Integer, nullable=True)
+
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\company.py =====
+# app/models/company.py
+import uuid
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean, Date, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+class Company(Base):
+    __tablename__ = "company"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name = Column(Text, nullable=False)
+    description = Column(Text)
+    createdby = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    createdat = Column(DateTime, server_default=func.now())
+    updatedat = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    
+    # Legal information
+    legal_representive = Column(Text, nullable=False)
+    legal_representive_text = Column(Text, nullable=False)
+    legal_representive_phone = Column(Text, nullable=False)
+    is_multinational = Column(Boolean, nullable=False, default=False)
+    legal_name = Column(Text, nullable=False)
+    trade_name = Column(Text, nullable=False)
+    incorporation_date = Column(Date, nullable=False)
+    country = Column(Text, nullable=False)
+    currency = Column(Text, nullable=False)
+    address = Column(Text, nullable=False)
+    entity_type = Column(Text, nullable=False)
+    
+    # 🔥 NEW: Licensing fields
+    license_tier = Column(String(20), nullable=False, default='free')
+    max_guides = Column(Integer, nullable=False, default=5)
+    is_active = Column(Boolean, nullable=False, default=True)
+    subscription_expires_at = Column(DateTime, nullable=True)
+    
+    # Relationships
+    creator = relationship("User", foreign_keys=[createdby])
+    members = relationship("CompanyMember", back_populates="company", cascade="all, delete-orphan")
+    invitations = relationship("InvitationCode", back_populates="company", cascade="all, delete-orphan")
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\companymember.py =====
+# app/models/companymember.py
+
+import uuid
+from sqlalchemy import Column, ForeignKey, String, Date, Boolean
+from sqlalchemy.dialects.postgresql import UUID
+from app.db.base import Base
+from sqlalchemy.orm import relationship
+
+class CompanyMember(Base):
+    __tablename__ = "company_members"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    companyid = Column(UUID(as_uuid=True), ForeignKey("company.id"), nullable=False)
+    userid = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    position = Column(String, nullable=False)
+    is_admin = Column(Boolean, nullable=False, default=False)
+    is_active = Column(Boolean, nullable=False, default=True)
+    joinedat = Column(Date, nullable=True)
+
+    company = relationship("Company", back_populates="members")
+    user = relationship("User")
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\invitation.py =====
+# app/models/invitation.py
+import uuid
+from sqlalchemy import Column, String, Text, DateTime, ForeignKey, Boolean
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+class InvitationCode(Base):
+    __tablename__ = "invitation_codes"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    code = Column(Text, unique=True, nullable=False, index=True)
+    
+    # Company and creator
+    company_id = Column(UUID(as_uuid=True), ForeignKey("company.id", ondelete="CASCADE"))
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    
+    # Invitation details
+    invited_email = Column(Text, nullable=True)
+    status = Column(String(20), nullable=False, default='pending')
+    
+    # Usage tracking
+    used = Column(Boolean, default=False)
+    used_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    used_at = Column(DateTime, nullable=True)
+    
+    # Expiration
+    expires_at = Column(DateTime)
+    created_at = Column(DateTime, server_default=func.now())
+    
+    # Relationships
+    company = relationship("Company", back_populates="invitations")
+    creator = relationship("User", foreign_keys=[created_by])
+    user_who_used = relationship("User", foreign_keys=[used_by])
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\location.py =====
+# app/models/location.py
+from sqlalchemy import Column, String, Float, TIMESTAMP, func, BigInteger
+from sqlalchemy.dialects.postgresql import UUID
+import uuid
+from app.db.base import Base  # ajusta a tu base
+from sqlalchemy.orm import relationship
+
+class Location(Base):
+    __tablename__ = "locations"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    display_name = Column(String, nullable=False)
+    lat = Column(Float, nullable=False)
+    lon = Column(Float, nullable=False)
+
+    # Campos nuevos
+    source = Column(String(16), nullable=False, default="manual")  # 'osm|geonames|wof|wikidata|manual'
+    osm_id = Column(BigInteger, nullable=True)
+    geonames_id = Column(BigInteger, nullable=True)
+    wof_id = Column(BigInteger, nullable=True)
+    wikidata_id = Column(String, nullable=True)
+
+    google_maps_url = Column(String, nullable=True)
+
+    created_at = Column(TIMESTAMP, nullable=False, server_default=func.now())
+    updated_at = Column(TIMESTAMP, nullable=False, server_default=func.now(), onupdate=func.now())
+
+    activities = relationship(
+            "Activity",
+            back_populates="location",
+            cascade="all, delete-orphan",
+            passive_deletes=True,
+        )
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\payment.py =====
+# app/models/payment.py
+import uuid
+from sqlalchemy import Column, ForeignKey, String, DateTime, Numeric
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from app.db.base import Base
+
+class Payment(Base):
+    __tablename__ = "payments"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"))
+    method_id  = Column(UUID(as_uuid=True), nullable=True)  # opcional en MVP
+    amount   = Column(Numeric(12,2), nullable=False)
+    currency = Column(String, nullable=False, default="USD")
+    status   = Column(String, nullable=False, default="pending")  # pending|confirmed|rejected
+    voucher_url = Column(String, nullable=True)
+    reference   = Column(String, nullable=True)
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\program_schedule.py =====
+import uuid
+from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, Integer
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+class ProgramSchedule(Base):
+    __tablename__ = "program_schedules"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    program_id = Column(UUID(as_uuid=True), ForeignKey("programs.id", ondelete="CASCADE"), nullable=False)
+    start_time = Column(DateTime, nullable=False)
+    end_time   = Column(DateTime, nullable=False)
+    price      = Column(Numeric(10,2))
+    created_at = Column(DateTime, server_default=func.now())
+    updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
+    status = Column(String, default="pending", nullable=False)
+    min_participants = Column(Integer, nullable=True)
+    max_participants = Column(Integer, nullable=True)
+    
+      # valores: pending | confirmed | canceled
+
+    program = relationship("Program", back_populates="schedules")
+    activity_schedules = relationship(
+        "ActivitySchedule",
+        back_populates="program_schedule",
+        cascade="all, delete-orphan"
+    )
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\programactivity.py =====
+# app/models/programactivity.py
+import uuid
+from sqlalchemy import Column, ForeignKey, UniqueConstraint, Index
+from sqlalchemy.dialects.postgresql import UUID
+from app.db.base import Base
+
+class ProgramActivity(Base):
+    __tablename__ = "programactivities"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    program_id = Column(UUID(as_uuid=True), ForeignKey("programs.id", ondelete="CASCADE"))
+    activity_id = Column(UUID(as_uuid=True), ForeignKey("activities.id", ondelete="CASCADE"))
+
+    __table_args__ = (
+        UniqueConstraint("program_id", "activity_id", name="uq_program_activity"),
+        Index("ix_programactivities_program_id", "program_id"),
+        Index("ix_programactivities_activity_id", "activity_id"),
+    )
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\programs.py =====
+# app/models/programs.py
+from sqlalchemy import Column, String, Text, JSON, Integer, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.sql import func
+from app.db.base import Base
+import uuid
+from sqlalchemy.orm import relationship
+
+class Program(Base):
+    __tablename__ = "programs"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    title = Column(String, nullable=False)
+    description = Column(Text)
+    gallery = Column(JSON, default=[])
+    min_activities = Column(Integer, default=2)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"))
+    guide_leader = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)  
+    created_at = Column(Text, default=func.now())
+    updated_at = Column(Text, default=func.now())
+    program_type = Column(UUID(as_uuid=True), ForeignKey("types.id"), nullable=False)
+    
+    # Relationships
+    type = relationship("Types", foreign_keys=[program_type])
+    creator = relationship("User",foreign_keys=[created_by],back_populates="created_programs")
+    leader = relationship("User", foreign_keys=[guide_leader],back_populates="led_programs")  
+    
+    activities = relationship(
+        "Activity",
+        secondary="programactivities",
+        back_populates="programs"
+    )
+
+    schedules = relationship(
+        "ProgramSchedule",
+        back_populates="program",
+        cascade="all, delete-orphan"
+    )
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\team.py =====
+# app/models/team.py
+import uuid
+from datetime import datetime, timezone
+from sqlalchemy import Column, ForeignKey, String, DateTime, Text
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+from app.db.base import Base
+
+
+class Team(Base):
+    __tablename__ = "teams"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4, nullable=False)
+    name = Column(String, nullable=False)
+    created_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    description = Column(Text, nullable=True)
+    company_id = Column(UUID(as_uuid=True), ForeignKey("company.id", ondelete="CASCADE"), nullable=False)
+    
+    # Relationships
+    members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")
+    creator = relationship("User", foreign_keys=[created_by])
+    company = relationship("Company")
+
+
+class TeamMember(Base):
+    __tablename__ = "team_members"
+    
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    team_id = Column(UUID(as_uuid=True), ForeignKey("teams.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    team_role = Column(String, nullable=False, default="day_guide")
+    joined_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    
+    # Relationships
+    team = relationship("Team", back_populates="members")
+    user = relationship("User")
+
+
+
+
+
+    
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\types.py =====
+# app/models/types.py
+from sqlalchemy import Column, String, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+import uuid
+from app.db.base import Base
+
+class Types(Base):
+    __tablename__ = "types"
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    type_name = Column(String(100), nullable=False, unique=True)
+    experience_type = Column(String(10), nullable=False)
+
+# app/models/activity.py
+from sqlalchemy import Column, ForeignKey
+from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.orm import relationship
+
+
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\models\user.py =====
+# app/models/user.py
+from sqlalchemy import Boolean, Column, Date, DateTime, String, text, func
+from sqlalchemy.dialects.postgresql import UUID, JSONB
+from app.db.base import Base  # or your Base
+import uuid
+import enum
+from sqlalchemy.orm import relationship
+
+
+class UserRole(enum.Enum):
+    user = "user"
+    guide = "guide"
+    company = "company"
+    admin = "admin"
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    display_name = Column(String, nullable=False)
+    email = Column(String, unique=True, index=True, nullable=False)
+    password_hash = Column(String, nullable=False)
+
+    # NEW mapped columns (exist in DB)
+    tax_id = Column(String, nullable=True)
+    first_name = Column(String, nullable=True)
+    last_name = Column(String, nullable=True)
+    national_id = Column(String, nullable=True)
+    passport_number = Column(String, nullable=True)
+    phone = Column(String, nullable=True)
+    profile_picture = Column(String, nullable=True)
+    fiscal_data = Column(JSONB, nullable=True, server_default=text("'{}'::jsonb"))
+    profile = Column(JSONB, nullable=True, server_default=text("'{}'::jsonb"))
+    preferred_language = Column(String(5), nullable=True)
+    is_active = Column(Boolean, nullable=False, server_default=text("true"))
+    role = Column(String(50), nullable=False)
+
+    birth_date = Column(Date, nullable=True)
+
+    created_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now())
+
+    created_activities = relationship(
+        "Activity",
+        foreign_keys="Activity.created_by",
+        back_populates="creator",
+        cascade="all, delete-orphan"
+    )
+    led_activities = relationship(
+        "Activity",
+        foreign_keys="Activity.guide_leader",
+        back_populates="leader"
+    )
+    
+    created_programs = relationship(
+        "Program",
+        foreign_keys="Program.created_by",
+        back_populates="creator",
+        cascade="all, delete-orphan"
+    )
+    led_programs = relationship(
+        "Program",
+        foreign_keys="Program.guide_leader",
+        back_populates="leader"
+    )
+
+
+
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\__init__.py =====
+﻿
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\activity.py =====
+# backend/app/schemas/activity.py
+from typing import Optional, List, Dict
+from uuid import UUID
+from datetime import datetime
+from pydantic import BaseModel, Field, ConfigDict
+from app.schemas.types import TypesOut
+
+from app.schemas.location import LocationOut, LocationResolveIn
+from app.schemas.user import UserOut  # quita esta línea si tu respuesta no expone "creator"
+
+class ActivityBase(BaseModel):
+    title: str
+    description: Optional[str] = None
+    activity_type: UUID
+    type: TypesOut
+
+class ActivityCreate(BaseModel):
+    title: str
+    description: Optional[str] = None
+    activity_type: UUID
+    location_id: UUID
+    guide_leader: Optional[UUID] = None  # 🔥 NUEVO
+    gallery: Optional[List[Dict]] = Field(default_factory=list)
+
+class ActivityOut(BaseModel):
+    id: UUID
+    title: str
+    description: Optional[str] = None
+    activity_type: UUID
+    type: Optional[TypesOut] = None
+    location: Optional[LocationOut] = None
+    gallery: List[Dict] = Field(default_factory=list)
+    creator: Optional[UserOut] = None
+    leader: Optional[UserOut] = None  
+    guide_leader: Optional[UUID] = None  
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\activity_schedule.py =====
+# backend/app/schemas/activity_schedule.py
+from pydantic import BaseModel, ConfigDict
+from typing import Optional, Literal
+from datetime import datetime
+from decimal import Decimal
+import uuid
+
+class ActivityScheduleCreate(BaseModel):
+    activity_id: uuid.UUID
+    start_time: datetime
+    end_time: datetime
+    program_schedule_id: Optional[uuid.UUID] = None
+    min_participants: Optional[int] = None
+    max_participants: Optional[int] = None
+    price: Optional[Decimal] = None
+    status: Literal["pending", "confirmed", "canceled"] = "pending"
+
+class ActivityScheduleOut(BaseModel):
+    id: uuid.UUID
+    activity_id: uuid.UUID
+    program_schedule_id: Optional[uuid.UUID]
+    start_time: datetime
+    end_time: datetime
+    min_participants: Optional[int]
+    max_participants: Optional[int]
+    price: Optional[Decimal]
+    status: Literal["pending", "confirmed", "canceled"]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\booking.py =====
+# app/schemas/booking.py
+import uuid
+from pydantic import BaseModel, Field
+from typing import List, Optional, Literal
+
+class BookingParticipant(BaseModel):
+    first_name: str
+    last_name: str
+    id_type: Literal["national_id", "passport"]
+    id_number: str
+    birth_date: str  # YYYY-MM-DD
+
+class BookingCreate(BaseModel):
+    activity_schedule_id: Optional[uuid.UUID] = None
+    program_schedule_id: Optional[uuid.UUID] = None
+    participants: List[BookingParticipant] = Field(min_length=1)
+
+class BookingOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID
+    activity_schedule_id: Optional[uuid.UUID] = None
+    program_schedule_id: Optional[uuid.UUID] = None
+    status: str
+    attendance_status: Optional[str] = None
+    participants_count: int
+    participants: List[BookingParticipant]
+
+    class Config:
+        from_attributes = True
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\company.py =====
+# app/schemas/company.py
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional, List
+from uuid import UUID
+from datetime import datetime, date
+from app.schemas.companymember import CompanyMemberOut
+
+class CompanyBase(BaseModel):
+    name: str
+    description: Optional[str] = None
+    legal_representive: str
+    legal_representive_text: str
+    legal_representive_phone: str
+    is_multinational: bool = False
+    legal_name: str
+    trade_name: str
+    incorporation_date: date
+    country: str
+    currency: str
+    address: str
+    entity_type: str
+
+class CompanyCreate(CompanyBase):
+    pass
+
+class CompanyUpdate(BaseModel):
+    name: Optional[str] = None
+    description: Optional[str] = None
+    legal_representive: Optional[str] = None
+    legal_representive_text: Optional[str] = None
+    legal_representive_phone: Optional[str] = None
+    is_multinational: Optional[bool] = None
+    legal_name: Optional[str] = None
+    trade_name: Optional[str] = None
+    incorporation_date: Optional[date] = None
+    country: Optional[str] = None
+    currency: Optional[str] = None
+    address: Optional[str] = None
+    entity_type: Optional[str] = None
+
+class CompanyOut(CompanyBase):
+    id: UUID
+    createdby: UUID
+    createdat: datetime
+    updatedat: datetime
+    license_tier: str
+    max_guides: int
+    is_active: bool
+    subscription_expires_at: Optional[datetime] = None
+    current_guides_count: Optional[int] = None
+    can_add_guides: Optional[bool] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class CompanyWithMembers(CompanyOut):
+    members: List['CompanyMemberOut'] = []
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class LicenseInfo(BaseModel):
+    tier: str
+    max_guides: int
+    current_guides: int
+    can_add_guides: bool
+    expires_at: Optional[datetime] = None
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\companymember.py =====
+# app/schemas/companymember.py
+from pydantic import BaseModel, Field, ConfigDict
+from typing import Optional
+from uuid import UUID
+from datetime import date
+
+class CompanyMemberBase(BaseModel):
+    position: str
+    is_admin: bool = False
+    is_active: bool = True
+    joined_at: Optional[date] = None
+
+class CompanyMemberCreate(CompanyMemberBase):
+    companyid: UUID
+    userid: UUID
+
+class CompanyMemberOut(CompanyMemberBase):
+    id: UUID
+    companyid: UUID
+    userid: UUID
+    # 🔥 NUEVO: Campos adicionales del usuario
+    user_display_name: Optional[str] = None
+    user_email: Optional[str] = None
+    user_full_name: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\invitation.py =====
+# app/schemas/invitation.py
+from pydantic import BaseModel, EmailStr, field_validator, ConfigDict, Field
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+
+class InvitationCreate(BaseModel):
+    invited_email: EmailStr
+    expires_in_days: int = Field(default=7, ge=1, le=30)
+    
+    @field_validator('invited_email')
+    @classmethod
+    def email_must_be_lowercase(cls, v):
+        return v.lower()
+
+class InvitationOut(BaseModel):
+    id: UUID
+    code: str
+    company_id: UUID
+    invited_email: Optional[str] = None
+    status: str
+    used: bool
+    expires_at: datetime
+    created_at: datetime
+    
+    model_config = ConfigDict(from_attributes=True)
+
+class InvitationAccept(BaseModel):
+    code: str
+
+class InvitationListOut(BaseModel):
+    id: UUID
+    invited_email: Optional[str] = None
+    status: str
+    created_at: datetime
+    expires_at: datetime
+    used_at: Optional[datetime] = None
+    
+    model_config = ConfigDict(from_attributes=True)
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\location.py =====
+# app/schemas/location.py
+from typing import Optional
+from uuid import UUID
+from datetime import datetime
+from pydantic import BaseModel, HttpUrl
+
+class LocationResolveIn(BaseModel):
+    display_name: Optional[str] = None
+    google_maps_url: Optional[HttpUrl] = None
+    lat: Optional[float] = None
+    lon: Optional[float] = None
+
+class LocationOut(BaseModel):
+    id: UUID
+    display_name: str
+    lat: float
+    lon: float
+    plus_code: Optional[str] = None
+    google_maps_url: Optional[str] = None
+    source: Optional[str] = None
+    osm_id: Optional[int] = None
+    geonames_id: Optional[int] = None
+    wof_id: Optional[int] = None
+    wikidata_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = {"from_attributes": True}
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\payment.py =====
+# app/schemas/payment.py
+from pydantic import BaseModel, AnyUrl, Field
+from typing import Optional, Literal
+from decimal import Decimal
+import uuid
+
+class PaymentCreate(BaseModel):
+    amount: Decimal = Field(gt=0)
+    currency: str = "USD"
+    voucher_url: Optional[AnyUrl] = None
+    reference: Optional[str] = None
+
+class PaymentOut(BaseModel):
+    id: uuid.UUID
+    booking_id: uuid.UUID
+    amount: Decimal
+    currency: str
+    status: Literal["pending","confirmed","rejected"]
+    voucher_url: Optional[str] = None
+    reference: Optional[str] = None
+    class Config:
+        from_attributes = True
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\program.py =====
+﻿# backend/app/schemas/programs.py
+from pydantic import BaseModel
+from uuid import UUID
+import uuid
+from app.schemas.types import TypesOut
+from typing import Optional, List
+
+class ProgramOut(BaseModel):
+    id: uuid.UUID
+    title: str
+    description: Optional[str] = None
+    gallery: Optional[List[dict]] = None
+    min_activities: Optional[int] = None
+    program_type: UUID
+    type: TypesOut
+    
+
+    class Config:
+        from_attributes = True
+
+class ProgramCreate(BaseModel):
+    title: str
+    description: Optional[str]
+    gallery: Optional[List[dict]]
+    min_activities: Optional[int]
+    program_type: UUID
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\program_schedule.py =====
+# app/schemas/program_schedule.py
+from pydantic import BaseModel
+from typing import Optional
+import uuid
+from datetime import datetime
+
+class ProgramScheduleCreate(BaseModel):
+    program_id: uuid.UUID
+    start_time: datetime
+    end_time: datetime
+    price: Optional[float] = None
+
+class ProgramScheduleOut(BaseModel):
+    id: uuid.UUID
+    program_id: uuid.UUID
+    start_time: datetime
+    end_time: datetime
+    price: Optional[float]
+    updated_at: Optional[datetime]
+
+    class Config:
+        from_attributes = True
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\types.py =====
+from pydantic import BaseModel
+from uuid import UUID
+
+class TypesOut(BaseModel):
+    id: UUID
+    type_name: str
+    experience_type: str
+
+    class Config:
+        from_attributes = True  # Para compatibilidad con SQLAlchemy Objects
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\schemas\user.py =====
+# backend/app/schemas/user.py
+from pydantic import BaseModel, EmailStr
+from typing import Optional, Any, Dict
+from pydantic import BaseModel, ConfigDict
+from datetime import date
+import uuid
+
+
+class UserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    national_id: Optional[str] = None
+    passport_number: Optional[str] = None
+    phone: Optional[str] = None
+    profile_picture: Optional[str] = None
+    preferred_language: Optional[str] = None
+    birth_date: Optional[date] = None
+    tax_id: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    fiscal_data: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+
+class AdminUserUpdate(BaseModel):
+    display_name: Optional[str] = None
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    national_id: Optional[str] = None
+    passport_number: Optional[str] = None
+    phone: Optional[str] = None
+    profile_picture: Optional[str] = None
+    preferred_language: Optional[str] = None
+    birth_date: Optional[date] = None
+    tax_id: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    fiscal_data: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = None
+
+class UserOut(BaseModel):
+    id: uuid.UUID
+    display_name: str
+    email: EmailStr
+    role: str
+    preferred_language: Optional[str] = None
+    is_active: bool
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    national_id: Optional[str] = None
+    passport_number: Optional[str] = None
+    phone: Optional[str] = None
+    profile_picture: Optional[str] = None
+    birth_date: Optional[date] = None
+    tax_id: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    fiscal_data: Optional[Dict[str, Any]] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+class UserWithCompanyOut(UserOut):
+    """Extended user response with company information for guides"""
+    company_name: Optional[str] = None
+    company_id: Optional[uuid.UUID] = None
+    is_company_admin: Optional[bool] = None
+    company_position: Optional[str] = None
+    
+    model_config = ConfigDict(from_attributes=True, extra="allow")
+
+class UserCreate(BaseModel):
+    # required
+    display_name: str
+    email: EmailStr
+    password: str
+    role: str
+
+    # optional
+    first_name: Optional[str] = None
+    last_name: Optional[str] = None
+    national_id: Optional[str] = None
+    passport_number: Optional[str] = None
+    phone: Optional[str] = None
+    profile_picture: Optional[str] = None
+    preferred_language: Optional[str] = None
+    birth_date: Optional[date] = None
+    tax_id: Optional[str] = None
+    profile: Optional[Dict[str, Any]] = None
+    fiscal_data: Optional[Dict[str, Any]] = None
+    is_active: Optional[bool] = True
+
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\services\__init__.py =====
+# app/services/__init__.py
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\services\invitations.py =====
+# app/services/invitations.py
+from sqlalchemy.orm import Session
+from app.models.invitation import InvitationCode
+from app.models.user import User
+from app.models.companymember import CompanyMember
+from app.models.company import Company
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+import secrets
+import string
+
+
+class InvitationManager:
+    """Manages company guide invitations"""
+    
+    @staticmethod
+    def generate_code(length: int = 12) -> str:
+        """Generate secure invitation code"""
+        alphabet = string.ascii_uppercase + string.digits
+        return ''.join(secrets.choice(alphabet) for _ in range(length))
+    
+    @staticmethod
+    def create_invitation(
+        db: Session,
+        company_id: UUID,
+        invited_email: str,
+        created_by: UUID,
+        expires_in_days: int = 7
+    ) -> InvitationCode:
+        """
+        Create invitation for guide to join company
+        
+        Args:
+            db: Database session
+            company_id: Target company UUID
+            invited_email: Email of guide to invite
+            created_by: UUID of admin creating invitation
+            expires_in_days: Validity period (default 7)
+        
+        Returns:
+            InvitationCode object
+        
+        Raises:
+            ValueError: If validation fails
+        """
+        
+        # 1. Validate company
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ValueError("Company not found")
+        if not company.is_active:
+            raise ValueError("Company is inactive")
+        
+        # 2. Check for duplicate active invitation
+        existing = db.query(InvitationCode).filter(
+            InvitationCode.company_id == company_id,
+            InvitationCode.invited_email == invited_email.lower(),
+            InvitationCode.status == 'pending',
+            InvitationCode.expires_at > datetime.now(timezone.utc)
+        ).first()
+        
+        if existing:
+            raise ValueError(f"Active invitation exists for {invited_email}")
+        
+        # 3. Check if already a member
+        user = db.query(User).filter(User.email == invited_email.lower()).first()
+        if user:
+            member = db.query(CompanyMember).filter(
+                CompanyMember.companyid == company_id,
+                CompanyMember.userid == user.id,
+                CompanyMember.is_active == True
+            ).first()
+            
+            if member:
+                raise ValueError(f"{invited_email} is already a member")
+        
+        # 4. Generate unique code
+        max_attempts = 10
+        for _ in range(max_attempts):
+            code = InvitationManager.generate_code()
+            if not db.query(InvitationCode).filter(InvitationCode.code == code).first():
+                break
+        else:
+            raise ValueError("Failed to generate unique code")
+        
+        # 5. Create invitation
+        invitation = InvitationCode(
+            code=code,
+            company_id=company_id,
+            invited_email=invited_email.lower(),
+            created_by=created_by,
+            expires_at=datetime.now(timezone.utc) + timedelta(days=expires_in_days),
+            status='pending'
+        )
+        
+        db.add(invitation)
+        db.flush()
+        
+        return invitation
+    
+    @staticmethod
+    def accept_invitation(
+        db: Session,
+        code: str,
+        user_id: UUID
+    ) -> CompanyMember:
+        """
+        Accept invitation and create company membership
+        
+        Args:
+            db: Database session
+            code: Invitation code
+            user_id: UUID of accepting user
+        
+        Returns:
+            CompanyMember object
+        
+        Raises:
+            ValueError: If validation fails
+        """
+        
+        # 1. Find invitation
+        invitation = db.query(InvitationCode).filter(
+            InvitationCode.code == code
+        ).first()
+        
+        if not invitation:
+            raise ValueError("Invalid invitation code")
+        
+        if invitation.status != 'pending':
+            raise ValueError(f"Invitation is {invitation.status}")
+        
+        if invitation.expires_at < datetime.now(timezone.utc):
+            invitation.status = 'expired'
+            db.flush()
+            raise ValueError("Invitation has expired")
+        
+        # 2. Validate user
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise ValueError("User not found")
+        
+        if user.role != "guide":
+            raise ValueError("Only guides can accept company invitations")
+        
+        if user.email.lower() != invitation.invited_email.lower():
+            raise ValueError("Email mismatch")
+        
+        # 3. Validate company
+        company = db.query(Company).filter(Company.id == invitation.company_id).first()
+        if not company or not company.is_active:
+            raise ValueError("Company is not active")
+        
+        # 4. Check existing membership
+        existing = db.query(CompanyMember).filter(
+            CompanyMember.companyid == invitation.company_id,
+            CompanyMember.userid == user_id
+        ).first()
+        
+        if existing:
+            if existing.is_active:
+                raise ValueError("Already a member")
+            else:
+                # Reactivate
+                existing.is_active = True
+                existing.joinedat = datetime.now(timezone.utc).date()
+                member = existing
+        else:
+            # Create membership
+            member = CompanyMember(
+                companyid=invitation.company_id,
+                userid=user_id,
+                position="Guide",
+                is_admin=False,
+                is_active=True,
+                joinedat=datetime.now(timezone.utc).date()
+            )
+            db.add(member)
+        
+        # 5. Mark invitation as used
+        invitation.status = 'accepted'
+        invitation.used = True
+        invitation.used_by = user_id
+        invitation.used_at = datetime.now(timezone.utc)
+        
+        db.flush()
+        return member
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\services\licensing.py =====
+# app/services/licensing.py
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from app.models.company import Company
+from app.models.companymember import CompanyMember
+from datetime import datetime, timezone
+from typing import Dict, Optional
+from uuid import UUID
+
+class LicenseManager:
+    """Manages company licensing and limits"""
+    
+    TIER_LIMITS = {
+        'free': 5,
+        'basic': 20,
+        'pro': 50,
+        'enterprise': None  # unlimited
+    }
+    
+    @staticmethod
+    def get_company_license_info(db: Session, company_id: UUID) -> Dict:
+        """Get complete license information for a company"""
+        company = db.query(Company).filter(Company.id == company_id).first()
+        if not company:
+            raise ValueError("Company not found")
+        
+        current_count = db.query(func.count(CompanyMember.id)).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.is_active == True
+        ).scalar()
+        
+        max_guides = LicenseManager.TIER_LIMITS.get(company.license_tier, 5)
+        
+        return {
+            'tier': company.license_tier,
+            'max_guides': max_guides,
+            'current_guides': current_count,
+            'can_add_guides': max_guides is None or current_count < max_guides,
+            'is_active': company.is_active,
+            'expires_at': company.subscription_expires_at
+        }
+    
+    @staticmethod
+    def can_add_guide(db: Session, company_id: UUID) -> bool:
+        """Check if company can add another guide"""
+        info = LicenseManager.get_company_license_info(db, company_id)
+        
+        # Check if company is active
+        if not info['is_active']:
+            return False
+        
+        # Check subscription expiration
+        if info['expires_at']:
+            if info['expires_at'] < datetime.now(timezone.utc):
+                return False
+        
+        return info['can_add_guides']
+    
+    @staticmethod
+    def validate_license(db: Session, company_id: UUID) -> None:
+        """Validate company license, raise exception if invalid"""
+        if not LicenseManager.can_add_guide(db, company_id):
+            info = LicenseManager.get_company_license_info(db, company_id)
+            
+            if not info['is_active']:
+                raise ValueError("Company license is inactive")
+            
+            if info['expires_at'] and info['expires_at'] < datetime.now(timezone.utc):
+                raise ValueError("Company license has expired")
+            
+            raise ValueError(
+                f"Company has reached maximum guides limit ({info['max_guides']}) "
+                f"for {info['tier']} tier"
+            )
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\services\validation.py =====
+# app/services/validation.py
+from sqlalchemy.orm import Session
+from sqlalchemy import func
+from app.models.companymember import CompanyMember
+from app.models.invitation import InvitationCode
+from datetime import datetime, timezone
+from typing import Optional
+from uuid import UUID
+
+
+class ValidationError(Exception):
+    """Custom validation error"""
+    pass
+
+
+class CompanyValidations:
+    """Validaciones de negocio para empresas"""
+    
+    @staticmethod
+    def validate_unique_active_membership(
+        db: Session,
+        user_id: UUID,
+        company_id: UUID
+    ) -> None:
+        """Valida que el usuario no sea ya miembro activo"""
+        existing = db.query(CompanyMember).filter(
+            CompanyMember.userid == user_id,
+            CompanyMember.companyid == company_id,
+            CompanyMember.is_active == True
+        ).first()
+        
+        if existing:
+            raise ValidationError("User is already an active member of this company")
+    
+    @staticmethod
+    def validate_no_pending_invitation(
+        db: Session,
+        email: str,
+        company_id: UUID
+    ) -> None:
+        """Valida que no exista una invitación pendiente para este email"""
+        existing = db.query(InvitationCode).filter(
+            InvitationCode.company_id == company_id,
+            InvitationCode.invited_email == email.lower(),
+            InvitationCode.status == 'pending',
+            InvitationCode.expires_at > datetime.now(timezone.utc)
+        ).first()
+        
+        if existing:
+            raise ValidationError(
+                f"A pending invitation already exists for {email}"
+            )
+    
+    @staticmethod
+    def validate_guides_limit(
+        db: Session,
+        company_id: UUID,
+        max_guides: int
+    ) -> None:
+        """Valida que no se exceda el límite de guías"""
+        current_count = db.query(func.count(CompanyMember.id)).filter(
+            CompanyMember.companyid == company_id,
+            CompanyMember.is_active == True
+        ).scalar()
+        
+        if current_count >= max_guides:
+            raise ValidationError(
+                f"Company has reached maximum guides limit ({max_guides})"
+            )
+    
+    @staticmethod
+    def validate_invitation_code(
+        db: Session,
+        code: str
+    ) -> InvitationCode:
+        """Valida que el código de invitación sea válido"""
+        invitation = db.query(InvitationCode).filter(
+            InvitationCode.code == code
+        ).first()
+        
+        if not invitation:
+            raise ValidationError("Invalid invitation code")
+        
+        if invitation.status != 'pending':
+            raise ValidationError(f"Invitation is {invitation.status}")
+        
+        if invitation.expires_at < datetime.now(timezone.utc):
+            invitation.status = 'expired'
+            db.flush()
+            raise ValidationError("Invitation has expired")
+        
+        if invitation.used:
+            raise ValidationError("Invitation has already been used")
+        
+        return invitation
+    
+    @staticmethod
+    def validate_email_match(
+        invitation: InvitationCode,
+        user_email: str
+    ) -> None:
+        """Valida que el email del usuario coincida con la invitación"""
+        if invitation.invited_email:
+            if user_email.lower() != invitation.invited_email.lower():
+                raise ValidationError(
+                    "This invitation is for a different email address"
+                )
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\utils.py =====
+# app/utils.py
+from passlib.context import CryptContext
+from datetime import datetime, timedelta
+from jose import jwt
+import os
+
+# Configuración para usar Argon2 (argon2id)
+pwd_context = CryptContext(
+    schemes=["argon2"],
+    deprecated="auto"
+)
+
+# Variables de entorno
+SECRET_KEY = os.getenv("SECRET_KEY", "test_secret_key")
+ALGORITHM = os.getenv("ALGORITHM", "HS256")
+ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "30"))
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    """
+    Verifica que la contraseña en texto plano coincida con el hash almacenado.
+    """
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    """
+    Genera un hash Argon2 para una nueva contraseña.
+    """
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: timedelta | None = None) -> str:
+    """
+    Crea un JWT de acceso con expiración.
+    """
+    to_encode = data.copy()
+    expire = datetime.utcnow() + (expires_delta or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES))
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+    return encoded_jwt
+
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\utils\geocode.py =====
+
+
+===== C:\Users\reyes\OneDrive\Documents\Proyectos Propios\outdaxius\backend\app\utils\security.py =====
+# English only for code
+from argon2 import PasswordHasher
+from argon2.exceptions import VerifyMismatchError
+
+_ph = PasswordHasher()  # Argon2id defaults: strong & memory-hard
+
+def hash_password(raw: str) -> str:
+    return _ph.hash(raw)
+
+def verify_password(stored_hash: str, raw: str) -> bool:
+    try:
+        _ph.verify(stored_hash, raw)
+        return True
+    except VerifyMismatchError:
+        return False
+
+
+
