@@ -1,10 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 export default function EditActivityModal({ activity, onClose, onSaved, onDeleted }) {
-  const { token } = useAuth();
   const [form, setForm] = useState({
     title: activity?.title || "",
     description: activity?.description || "",
@@ -38,19 +35,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
     setSaving(true); setError("");
     try {
       const payload = { ...form, gallery };
-      const res = await fetch(`${API}/activities/${activity.id}`, {
-        method: "PUT",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-      if (!res.ok) {
-        const j = await res.json().catch(() => ({}));
-        throw new Error(j.detail || "Error updating activity");
-      }
-      const updated = await res.json();
+      const updated = await api.put(`/activities/${activity.id}`, payload);
       onSaved?.(updated);
       onClose();
     } catch (e) {
@@ -63,16 +48,7 @@ export default function EditActivityModal({ activity, onClose, onSaved, onDelete
   const handleDelete = async () => {
     setDeleting(true); setError("");
     try {
-      const res = await fetch(`${API}/activities/${activity.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const text = await res.text();
-  console.error("DELETE failed:", res.status, text);
-  const msg = (() => { try { return JSON.parse(text).detail } catch { return null } })();
-  throw new Error(msg || "Error deleting activity")
-      }
+      await api.delete(`/activities/${activity.id}`);
       onDeleted?.(activity.id);
       onClose();
     } catch (e) {

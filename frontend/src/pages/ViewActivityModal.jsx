@@ -1,8 +1,8 @@
 // frontend/src/pages/ViewActivityModal.jsx
 import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { useToast } from "../context/ToastContext";
+import { api, ApiError } from "../lib/api";
 
 export default function ViewActivityModal({
   activity: activityProp,
@@ -11,6 +11,7 @@ export default function ViewActivityModal({
   hideBookings = false,
 }) {
   const { token, user } = useAuth();
+  const toast = useToast();
 
   const [activity, setActivity] = useState(activityProp || null);
   const [schedules, setSchedules] = useState([]);
@@ -34,11 +35,12 @@ export default function ViewActivityModal({
 
   const fetchMe = async () => {
     if (!token) return null;
-    const r = await fetch(`${API}/users/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) return null;
-    const me = await r.json();
+    let me;
+    try {
+      me = await api.get(`/users/me`);
+    } catch {
+      return null;
+    }
     guideIdsRef.current = {
       national_id: me?.national_id || "",
       passport_number: me?.passport_number || "",
@@ -86,9 +88,8 @@ export default function ViewActivityModal({
   useEffect(() => {
     if (activity || !activityId) return;
     setLoadingActivity(true);
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/activities/${activityId}`, { headers })
-      .then((r) => (r.ok ? r.json() : Promise.reject()))
+    api
+      .get(`/activities/${activityId}`, { skipAuth: !token })
       .then((a) => setActivity(a || null))
       .catch(() => setError("No se pudo cargar la actividad"))
       .finally(() => setLoadingActivity(false));
@@ -97,9 +98,8 @@ export default function ViewActivityModal({
   useEffect(() => {
     if (hideBookings || !activity?.id) return;
     setLoadingSchedules(true);
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/activity-schedules/?activity_id=${activity.id}`, { headers })
-      .then((r) => (r.ok ? r.json() : Promise.resolve([])))
+    api
+      .get(`/activity-schedules/?activity_id=${activity.id}`, { skipAuth: !token })
       .then((rows) => {
         const arr = Array.isArray(rows) ? rows : [];
         const clean = arr
@@ -391,7 +391,7 @@ export default function ViewActivityModal({
                         className="btn btn-success"
                         type="button"
                         onClick={async () => {
-                          if (!token) return alert("Login first");
+                          if (!token) return toast.error("Login first");
                           const gids = [
                             guideIdsRef.current.national_id,
                             guideIdsRef.current.passport_number,
@@ -400,34 +400,24 @@ export default function ViewActivityModal({
                             (pp) => gids.includes(normId(pp.id_number))
                           );
                           if (clash) {
-                            alert("Invalid: a passenger uses the guide's ID number.");
+                            toast.error("Invalid: a passenger uses the guide's ID number.");
                             return;
                           }
                           try {
-                            const res = await fetch(`${API}/bookings/`, {
-                              method: "POST",
-                              headers: {
-                                "Content-Type": "application/json",
-                                Authorization: `Bearer ${token}`,
-                              },
-                              body: JSON.stringify({
-                                activity_schedule_id: selectedSchedule.id,
-                                participants,
-                              }),
+                            await api.post(`/bookings/`, {
+                              activity_schedule_id: selectedSchedule.id,
+                              participants,
                             });
-                            const j = await res.json().catch(() => ({}));
-                            if (res.status === 401) {
-                              alert("Sesión expirada. Inicia sesión nuevamente.");
-                              return;
-                            }
-                            if (!res.ok) {
-                              alert(j?.detail || "Error");
-                              return;
-                            }
-                            alert("Booking created");
+                            toast.success("Booking created");
                             resetSelection();
-                          } catch {
-                            alert("Network error");
+                          } catch (err) {
+                            if (err instanceof ApiError && err.status === 401) {
+                              toast.error("Sesión expirada. Inicia sesión nuevamente.");
+                            } else if (err instanceof ApiError) {
+                              toast.error(err.message || "Error");
+                            } else {
+                              toast.error("Network error");
+                            }
                           }
                         }}
                       >

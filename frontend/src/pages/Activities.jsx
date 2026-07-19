@@ -5,8 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import EditActivityModal from "./EditActivityModal";
 import ViewActivityModal from "./ViewActivityModal";
 import SearchBar from "../components/SearchBar";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 function normalizeGallery(g) {
   if (!Array.isArray(g)) return [];
@@ -48,9 +47,8 @@ export default function Activities() {
 
   useEffect(() => {
     let alive = true;
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/activities/`, { headers })
-      .then((r) => (r.ok ? r.json() : []))
+    api
+      .get(`/activities/`, { skipAuth: !token })
       .then((rows) => {
         if (!alive) return;
         const data = (Array.isArray(rows) ? rows : []).map((a) => ({
@@ -74,9 +72,8 @@ export default function Activities() {
   // request-per-card. Public/unscoped on purpose -- this is the customer-facing browse view.
   useEffect(() => {
     let alive = true;
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/activity-schedules/`, { headers })
-      .then((r) => (r.ok ? r.json() : []))
+    api
+      .get(`/activity-schedules/`, { skipAuth: !token })
       .then((rows) => {
         if (!alive) return;
         const now = Date.now();
@@ -132,13 +129,8 @@ const runSearch = async ({ query }) => {
 
   setSearching(true);
   try {
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    const r = await fetch(
-      `${API}/activities/search?q=${encodeURIComponent(text)}`,
-      { headers }
-    );
-    const arr = r.ok ? await r.json() : [];
-    const normalized = arr.map(a => ({
+    const arr = await api.get(`/activities/search?q=${encodeURIComponent(text)}`, { skipAuth: !token });
+    const normalized = (arr || []).map(a => ({
       ...a,
       gallery: normalizeGallery(a.gallery)
     }));

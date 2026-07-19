@@ -1,13 +1,13 @@
 // frontend/src/pages/CreateCompany.jsx
 import { useState } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { useNavigate } from "react-router-dom";
-
-const API = (import.meta.env.VITE_API ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
-const join = (p) => `${API}${p.startsWith("/") ? "" : "/"}${p}`;
+import { api } from "../lib/api";
 
 export default function CreateCompany() {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -43,22 +43,8 @@ export default function CreateCompany() {
     }
 
     try {
-      const res = await fetch(join("/companies"), {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(form),
-      });
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Error ${res.status}`);
-      }
-
-      const company = await res.json();
-      alert("Company created successfully!");
+      const company = await api.post("/companies", form);
+      toast.success("Company created successfully!");
       navigate(`/main/${encodeURIComponent(user.email)}/company/${company.id}`);
     } catch (err) {
       setError(err.message || "Failed to create company");

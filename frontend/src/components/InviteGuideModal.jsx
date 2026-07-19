@@ -1,10 +1,11 @@
 // frontend/src/components/InviteGuideModal.jsx
 
 import { useState } from "react";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
+import { useToast } from "../context/ToastContext";
 
 export default function InviteGuideModal({ companyId, onClose, onSuccess }) {
+  const toast = useToast();
   const [email, setEmail] = useState("");
   const [expires, setExpires] = useState(7);
   const [loading, setLoading] = useState(false);
@@ -16,34 +17,16 @@ export default function InviteGuideModal({ companyId, onClose, onSuccess }) {
     setLoading(true);
 
     try {
-      const token = localStorage.getItem("token");
-      const res = await fetch(
-        `${API}/companies/${companyId}/invitations`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            invited_email: email,
-            expires_in_days: expires,
-          }),
-        }
-      );
+      const invitation = await api.post(`/companies/${companyId}/invitations`, {
+        invited_email: email,
+        expires_in_days: expires,
+      });
 
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.detail || "Failed to create invitation");
-      }
-
-      const invitation = await res.json();
-      
       // Show success with invitation link
       const link = `${window.location.origin}/accept-invitation?code=${invitation.code}`;
-      
-      alert(`✅ Invitation created!\n\nShare this link with the guide:\n${link}`);
-      
+
+      toast.success(`Invitation created! Share this link with the guide:\n${link}`, { duration: 10000 });
+
       onSuccess?.();
       onClose();
     } catch (err) {

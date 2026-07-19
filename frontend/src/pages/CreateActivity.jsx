@@ -1,28 +1,25 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import SearchableSelect from "../components/SearchableSelect";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api, ApiError } from "../lib/api";
 
 async function searchLocations(query) {
-  const res = await fetch(`${API}/locations/search?q=${encodeURIComponent(query)}`);
-  if (res.status === 404) return [];
-  if (!res.ok) throw await res.json();
-  return res.json();
+  try {
+    return await api.get(`/locations/search?q=${encodeURIComponent(query)}`, { skipAuth: true });
+  } catch (err) {
+    if (err instanceof ApiError && err.status === 404) return [];
+    throw err;
+  }
 }
 
 async function createLocation(payload) {
-  const res = await fetch(`${API}/locations/`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (!res.ok) throw await res.json();
-  return res.json();
+  return api.post("/locations/", payload, { skipAuth: true });
 }
 
 export default function CreateActivity() {
   const { token } = useAuth();
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [guides, setGuides] = useState([]);
   const [loadingGuides, setLoadingGuides] = useState(false);
@@ -59,19 +56,9 @@ export default function CreateActivity() {
       setLoadingTypes(true);
       setTypesError("");
       try {
-        const res = await fetch(`${API}/types/?experience_type=activity`);
-        
-        console.log("Types API response status:", res.status);
-        
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error("Types API error:", errorText);
-          throw new Error(`API returned ${res.status}: ${errorText}`);
-        }
-        
-        const data = await res.json();
+        const data = await api.get(`/types/?experience_type=activity`, { skipAuth: true });
         console.log("Types loaded:", data);
-        
+
         if (!Array.isArray(data)) {
           throw new Error("API did not return an array");
         }
@@ -104,17 +91,7 @@ useEffect(() => {
     
     setLoadingGuides(true);
     try {
-      const res = await fetch(`${API}/users?role=guide`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (!res.ok) {
-        console.error("Failed to load guides:", res.status);
-        setGuides([]);
-        return;
-      }
-      
-      const data = await res.json();
+      const data = await api.get(`/users?role=guide`);
       console.log("Guides loaded:", data);
       setGuides(Array.isArray(data) ? data : []);
     } catch (err) {
@@ -182,7 +159,7 @@ const guideOptions = guides.map(g => ({
       setField("location_id", newLoc.id);
       setLocationResults([]);
     } catch (e) {
-      setError(e?.detail || "Error creando la ubicación.");
+      setError((e instanceof ApiError && e.detail?.detail) || e?.message || "Error creando la ubicación.");
     }
   };
 
@@ -217,47 +194,10 @@ const guideOptions = guides.map(g => ({
 
       console.log("Sending payload:", payload);
 
-      const res = await fetch(`${API}/activities/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const contentType = res.headers.get("content-type");
-        let errorMessage = `Error ${res.status}`;
-        
-        if (contentType && contentType.includes("application/json")) {
-          const j = await res.json();
-          console.error("Error response:", j);
-          
-          // Manejar errores de validación de Pydantic
-          if (Array.isArray(j.detail)) {
-            errorMessage = j.detail.map(err => {
-              const field = Array.isArray(err.loc) ? err.loc.join('.') : 'unknown';
-              return `${field}: ${err.msg}`;
-            }).join('\n');
-          } else if (typeof j.detail === 'string') {
-            errorMessage = j.detail;
-          } else {
-            errorMessage = JSON.stringify(j.detail);
-          }
-        } else {
-          const text = await res.text();
-          console.error("Error response (text):", text);
-          errorMessage = text || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const created = await res.json();
+      const created = await api.post("/activities/", payload);
       console.log("Activity created:", created);
-      alert("Activity created successfully!");
-      
+      toast.success("Activity created successfully!");
+
       // Reset form
       setForm({
         title: "",
@@ -272,7 +212,12 @@ const guideOptions = guides.map(g => ({
       setSelectedLocation(null);
       setLocationQuery("");
     } catch (e) {
-      const errorMsg = e.message || String(e);
+      let errorMsg = e.message || String(e);
+      if (e instanceof ApiError && Array.isArray(e.detail?.detail)) {
+        errorMsg = e.detail.detail
+          .map((err) => `${Array.isArray(err.loc) ? err.loc.join(".") : "unknown"}: ${err.msg}`)
+          .join("\n");
+      }
       setError(errorMsg);
       console.error("Submit error:", e);
     }

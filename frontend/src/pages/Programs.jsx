@@ -5,8 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import EditProgramModal from "./EditProgramModal";
 import ViewProgramModal from "./ViewProgramModal";
 import SearchBar from "../components/SearchBar";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 // normaliza y ordena galería por position
 function normalizeGallery(g) {
@@ -50,8 +49,8 @@ export default function Programs() {
 
   useEffect(() => {
     let alive = true;
-    fetch(`${API}/programs/`)
-      .then((r) => (r.ok ? r.json() : []))
+    api
+      .get(`/programs/`, { skipAuth: true })
       .then((data) => {
         if (!alive) return;
         const normal = (Array.isArray(data) ? data : []).map((p) => ({
@@ -75,8 +74,8 @@ export default function Programs() {
   // request-per-card. Public/unscoped on purpose -- this is the customer-facing browse view.
   useEffect(() => {
     let alive = true;
-    fetch(`${API}/program-schedules/`)
-      .then((r) => (r.ok ? r.json() : []))
+    api
+      .get(`/program-schedules/`, { skipAuth: true })
       .then((rows) => {
         if (!alive) return;
         const now = Date.now();

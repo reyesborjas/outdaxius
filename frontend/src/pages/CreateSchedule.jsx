@@ -1,12 +1,12 @@
 // frontend/src/pages/CreateSchedule.jsx
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { useToast } from "../context/ToastContext";
+import { api, ApiError } from "../lib/api";
 
 export default function CreateSchedule() {
   const { token } = useAuth();
-  const companyId = localStorage.getItem("activeCompanyId");
+  const toast = useToast();
   const [step, setStep] = useState(1);
   const [mode, setMode] = useState(""); // "program" | "activity"
 
@@ -29,27 +29,15 @@ export default function CreateSchedule() {
   // Carga base
   useEffect(() => {
     if (!token) return;
-    fetch(`${API}/programs/`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then(setPrograms)
-      .catch(() => {});
-    fetch(`${API}/activities/`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => r.json())
-      .then(setActivities)
-      .catch(() => {});
+    api.get(`/programs/`).then(setPrograms).catch(() => {});
+    api.get(`/activities/`).then(setActivities).catch(() => {});
   }, [token]);
 
   // Cargar actividades ligadas al programa
   useEffect(() => {
     if (mode === "program" && form.program_id) {
-      fetch(`${API}/programs/${form.program_id}/activities`, {
-        headers: { Authorization: `Bearer ${token}` },
-      })
-        .then((r) => r.json())
+      api
+        .get(`/programs/${form.program_id}/activities`)
         .then((data) => {
           setProgramActivities(Array.isArray(data) ? data : []);
           const init = {};
@@ -98,24 +86,18 @@ export default function CreateSchedule() {
           min_participants: form.min_participants ? parseInt(form.min_participants) : null,
           max_participants: form.max_participants ? parseInt(form.max_participants) : null,
         };
-        const res = await fetch(`${API}/activity-schedules/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            ...(companyId ? { "X-Company-Id": companyId } : {}),
-          },
-          body: JSON.stringify(payload),
-        });
-        if (!res.ok) throw new Error("Error creating activity schedule")
-          if (res.status === 401) {
-              throw new Error("Tu sesión expiró o no estás autenticado.");
-            }
-            if (res.status === 403) {
-              throw new Error("No tienes permisos para crear horarios de programas.");
-            }
-            if (!res.ok) throw new Error("Error creando el horario del programa");
-        alert("Activity schedule created!");
+        try {
+          await api.post(`/activity-schedules/`, payload);
+        } catch (err) {
+          if (err instanceof ApiError && err.status === 401) {
+            throw new Error("Tu sesión expiró o no estás autenticado.");
+          }
+          if (err instanceof ApiError && err.status === 403) {
+            throw new Error("No tienes permisos para crear horarios de programas.");
+          }
+          throw new Error("Error creando el horario del programa");
+        }
+        toast.success("Activity schedule created!");
       } else if (mode === "program") {
         // Crear program schedule
         const programPayload = {
@@ -124,17 +106,12 @@ export default function CreateSchedule() {
           end_time: form.end_time,
           price: form.price ? parseFloat(form.price) : null,
         };
-        const res = await fetch(`${API}/program-schedules/`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-            ...(companyId ? { "X-Company-Id": companyId } : {}),
-          },
-          body: JSON.stringify(programPayload),
-        });
-        if (!res.ok) throw new Error("Error creating program schedule");
-        const parent = await res.json();
+        let parent;
+        try {
+          parent = await api.post(`/program-schedules/`, programPayload);
+        } catch {
+          throw new Error("Error creating program schedule");
+        }
 
         // Crear hijos (itinerarios)
         for (let [id, times] of Object.entries(activitySchedules)) {
@@ -151,19 +128,14 @@ export default function CreateSchedule() {
             start_time: times.start,
             end_time: times.end,
           };
-          const resAct = await fetch(`${API}/activity-schedules/`, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${token}`,
-              ...(companyId ? { "X-Company-Id": companyId } : {}),
-            },
-            body: JSON.stringify(actPayload),
-          });
-          if (!resAct.ok) throw new Error("Error creating activity schedule");
+          try {
+            await api.post(`/activity-schedules/`, actPayload);
+          } catch {
+            throw new Error("Error creating activity schedule");
+          }
         }
 
-        alert("Program and activity schedules created!");
+        toast.success("Program and activity schedules created!");
       }
     } catch (e) {
       setError(e.message);

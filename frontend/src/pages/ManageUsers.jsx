@@ -1,6 +1,8 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import { useNavigate } from "react-router-dom";
+import { api } from "../lib/api";
 
 // Helper para normalizar roles
 function normalizeRole(role) {
@@ -16,14 +18,9 @@ function normalizeRole(role) {
   }
 }
 
-// CORRECCIÓN: Función para construir URLs completas
-const buildBackendUrl = (endpoint) => {
-  const baseUrl = (import.meta.env.VITE_API || "http://127.0.0.1:8000/api").replace(/\/$/, "");
-  return `${baseUrl}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
-};
-
 export default function ManageUsers() {
-  const { user, fetchWithAuth } = useAuth();
+  const { user } = useAuth();
+  const toast = useToast();
   const navigate = useNavigate();
   const [users, setUsers] = useState([]);
   const [q, setQ] = useState("");
@@ -44,13 +41,11 @@ export default function ManageUsers() {
   // company's members here, alongside platform admins.
   useEffect(() => {
     if (!user || user.role === "admin") return;
-    fetchWithAuth(buildBackendUrl("/users/me/company-info"), {
-      headers: { Accept: "application/json" },
-    })
-      .then((r) => (r.ok ? r.json() : null))
+    api
+      .get("/users/me/company-info")
       .then((info) => setIsCompanyAdmin(!!(info?.type === "company_member" && info?.is_admin)))
       .catch(() => setIsCompanyAdmin(false));
-  }, [user, fetchWithAuth]);
+  }, [user]);
 
   const canManage = user?.role === "admin" || isCompanyAdmin;
 
@@ -59,32 +54,12 @@ export default function ManageUsers() {
     setLoading(true);
     setError(undefined);
     try {
-      // CORRECCIÓN: Construir URL completa manualmente
       let endpoint = "/users";
       if (q.trim().length > 0) {
         endpoint += `?search=${encodeURIComponent(q.trim())}`;
       }
-      
-      const fullUrl = buildBackendUrl(endpoint);
-      console.log("Fetching users from:", fullUrl);
-      
-      const res = await fetchWithAuth(fullUrl, {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-        },
-      });
-      
-      console.log("Response status:", res.status, res.statusText);
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        console.error("Error response:", errorText);
-        throw new Error(`Error fetching users: ${res.status} ${res.statusText}`);
-      }
-      
-      const items = await res.json();
-      console.log("Users received:", items);
+
+      const items = await api.get(endpoint);
       setUsers(Array.isArray(items) ? items : []);
     } catch (e) {
       setError(String(e.message || e));
@@ -93,7 +68,7 @@ export default function ManageUsers() {
       setLoading(false);
       setRefreshing(false);
     }
-  }, [fetchWithAuth, q]);
+  }, [q]);
 
   // Cargar usuarios cuando el componente se monta o cambian las dependencias
   useEffect(() => {
@@ -108,23 +83,7 @@ export default function ManageUsers() {
 
     try {
       setRefreshing(true);
-      // CORRECCIÓN: URL completa para PATCH
-      const fullUrl = buildBackendUrl(`/users/${userId}`);
-      const res = await fetchWithAuth(
-        fullUrl,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ is_active: !currentActive }),
-        }
-      );
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Failed to update user status: ${res.status} ${errorText}`);
-      }
+      await api.patch(`/users/${userId}`, { is_active: !currentActive });
 
       // Recargar la lista de usuarios
       await fetchUsers();
@@ -143,21 +102,11 @@ export default function ManageUsers() {
 
     try {
       setRefreshing(true);
-      const fullUrl = buildBackendUrl(`/companymembers/${targetUser.company_member_id}`);
-      const res = await fetchWithAuth(fullUrl, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          position: targetUser.company_position,
-          is_admin: !!targetUser.is_company_admin,
-          is_active: false,
-        }),
+      await api.put(`/companymembers/${targetUser.company_member_id}`, {
+        position: targetUser.company_position,
+        is_admin: !!targetUser.is_company_admin,
+        is_active: false,
       });
-
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Failed to remove member: ${res.status} ${errorText}`);
-      }
 
       await fetchUsers();
     } catch (e) {
@@ -172,27 +121,12 @@ export default function ManageUsers() {
     
     try {
       setRefreshing(true);
-      
-      // CORRECCIÓN: Construir URL completa
-      const fullUrl = buildBackendUrl(`/roles/assign?userid=${userId}&role=${newRole}`);
-      console.log("Assigning role:", fullUrl);
-      
-      const res = await fetchWithAuth(fullUrl, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-      });
-      
-      if (!res.ok) {
-        const errorText = await res.text();
-        throw new Error(`Failed to assign role: ${res.status} ${errorText}`);
-      }
-      
+      await api.post(`/roles/assign?userid=${userId}&role=${newRole}`);
+
       // Recargar la lista de usuarios
       await fetchUsers();
     } catch (e) {
-      alert(`Error asignando rol: ${e.message}`);
+      toast.error(`Error asignando rol: ${e.message}`);
       setError(String(e.message || e));
       setRefreshing(false);
     }

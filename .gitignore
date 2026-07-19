@@ -1,7 +1,7 @@
 # Python virtual envs (including the stray venv rooted here)
 venv/
-Lib/
-Scripts/
+/Lib/
+/Scripts/
 pyvenv.cfg
 __pycache__/
 *.pyc

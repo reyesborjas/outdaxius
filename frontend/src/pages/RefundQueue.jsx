@@ -1,11 +1,8 @@
 // frontend/src/pages/RefundQueue.jsx
 import { useCallback, useEffect, useState } from "react";
-import { useAuth } from "../context/AuthContext";
-
-const API = (import.meta.env.VITE_API || "http://127.0.0.1:8000/api").replace(/\/$/, "");
+import { api } from "../lib/api";
 
 export default function RefundQueue() {
-  const { fetchWithAuth } = useAuth();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -15,17 +12,13 @@ export default function RefundQueue() {
     setLoading(true);
     setError("");
     try {
-      const res = await fetchWithAuth(`${API}/admin/refunds/manual-queue`, {
-        headers: { Accept: "application/json" },
-      });
-      if (!res.ok) throw new Error(`Error ${res.status} loading refund queue`);
-      setBookings(await res.json());
+      setBookings(await api.get(`/admin/refunds/manual-queue`));
     } catch (e) {
       setError(e.message);
     } finally {
       setLoading(false);
     }
-  }, [fetchWithAuth]);
+  }, []);
 
   useEffect(() => { loadQueue(); }, [loadQueue]);
 
@@ -33,15 +26,7 @@ export default function RefundQueue() {
     const note = window.prompt(`Note for marking this refund as "${outcome}" (optional):`) || "";
     setResolvingId(bookingId);
     try {
-      const res = await fetchWithAuth(`${API}/admin/refunds/${bookingId}/resolve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ outcome, note }),
-      });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not resolve refund");
-      }
+      await api.post(`/admin/refunds/${bookingId}/resolve`, { outcome, note });
       await loadQueue();
     } catch (e) {
       setError(e.message);

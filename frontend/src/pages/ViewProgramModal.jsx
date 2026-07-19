@@ -4,8 +4,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import ViewActivityModal from "../pages/ViewActivityModal";
 import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { useToast } from "../context/ToastContext";
+import { api, ApiError } from "../lib/api";
 
 function normalizeGallery(g) {
   if (!Array.isArray(g)) return [];
@@ -23,6 +23,7 @@ const normId = (s) => String(s || "").replace(/[\s.\-]/g, "").toUpperCase();
 
 export default function ViewProgramModal({ program, onClose }) {
   const { token, user } = useAuth();
+  const toast = useToast();
 
   const [activities, setActivities] = useState([]);
   const [schedules, setSchedules] = useState([]);
@@ -47,11 +48,12 @@ export default function ViewProgramModal({ program, onClose }) {
 
   const fetchMe = async () => {
     if (!token) return null;
-    const r = await fetch(`${API}/users/me`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!r.ok) return null;
-    const me = await r.json();
+    let me;
+    try {
+      me = await api.get(`/users/me`);
+    } catch {
+      return null;
+    }
     guideIdsRef.current = {
       national_id: me?.national_id || "",
       passport_number: me?.passport_number || "",
@@ -109,9 +111,8 @@ export default function ViewProgramModal({ program, onClose }) {
   useEffect(() => {
     if (!program?.id) return;
     setLoadingActs(true);
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/programs/${program.id}/activities`, { headers })
-      .then((r) => (r.ok ? r.json() : Promise.resolve([])))
+    api
+      .get(`/programs/${program.id}/activities`, { skipAuth: !token })
       .then((rows) => setActivities(Array.isArray(rows) ? rows : []))
       .catch(() => setActivities([]))
       .finally(() => setLoadingActs(false));
@@ -120,9 +121,8 @@ export default function ViewProgramModal({ program, onClose }) {
   // Load program schedules
   useEffect(() => {
     if (!program?.id) return;
-    const headers = token ? { Authorization: `Bearer ${token}` } : {};
-    fetch(`${API}/program-schedules/?program_id=${program.id}`, { headers })
-      .then((r) => (r.ok ? r.json() : Promise.resolve([])))
+    api
+      .get(`/program-schedules/?program_id=${program.id}`, { skipAuth: !token })
       .then((rows) => setSchedules(Array.isArray(rows) ? rows : []))
       .catch(() => setSchedules([]));
   }, [program?.id, token]);
@@ -426,7 +426,7 @@ export default function ViewProgramModal({ program, onClose }) {
                     className="btn btn-success"
                     type="button"
                     onClick={async () => {
-                      if (!token) return alert("Login first");
+                      if (!token) return toast.error("Login first");
 
                       // Guide-only: block passenger with same ID as guide
                       if (user?.role === "guide") {
@@ -440,36 +440,26 @@ export default function ViewProgramModal({ program, onClose }) {
                           gids.includes(normId(pp.id_number))
                         );
                         if (clash) {
-                          alert("Invalid: a passenger uses the guide’s ID number.");
+                          toast.error("Invalid: a passenger uses the guide’s ID number.");
                           return;
                         }
                       }
 
                       try {
-                        const res = await fetch(`${API}/bookings/`, {
-                          method: "POST",
-                          headers: {
-                            "Content-Type": "application/json",
-                            Authorization: `Bearer ${token}`,
-                          },
-                          body: JSON.stringify({
-                            program_schedule_id: selectedProgramSchedule.id,
-                            participants,
-                          }),
+                        await api.post(`/bookings/`, {
+                          program_schedule_id: selectedProgramSchedule.id,
+                          participants,
                         });
-                        const j = await res.json().catch(() => ({}));
-                        if (res.status === 401) {
-                          alert("Sesión expirada. Inicia sesión nuevamente.");
-                          return;
-                        }
-                        if (!res.ok) {
-                          alert(j?.detail || "Error");
-                          return;
-                        }
-                        alert("Booking created");
+                        toast.success("Booking created");
                         resetSelection();
-                      } catch {
-                        alert("Network error");
+                      } catch (err) {
+                        if (err instanceof ApiError && err.status === 401) {
+                          toast.error("Sesión expirada. Inicia sesión nuevamente.");
+                        } else if (err instanceof ApiError) {
+                          toast.error(err.message || "Error");
+                        } else {
+                          toast.error("Network error");
+                        }
                       }
                     }}
                   >

@@ -1,7 +1,6 @@
 // frontend/src/components/CompanyPaymentSettings.jsx
 import { useEffect, useState } from "react";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 const PROVIDER_CREDENTIAL_FIELDS = {
   flow: [
@@ -30,10 +29,8 @@ export default function CompanyPaymentSettings({ companyId, token }) {
   const loadAccounts = () => {
     if (!companyId || !token) return;
     setLoading(true);
-    fetch(`${API}/companies/${companyId}/payment-accounts`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+    api
+      .get(`/companies/${companyId}/payment-accounts`)
       .then((data) => {
         setAccounts(data);
         setError("");
@@ -53,23 +50,12 @@ export default function CompanyPaymentSettings({ companyId, token }) {
     setSaving(true);
     setError("");
     try {
-      const res = await fetch(`${API}/companies/${companyId}/payment-accounts`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          provider,
-          is_sandbox: isSandbox,
-          currency,
-          credentials: credentialValues,
-        }),
+      await api.post(`/companies/${companyId}/payment-accounts`, {
+        provider,
+        is_sandbox: isSandbox,
+        currency,
+        credentials: credentialValues,
       });
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not save payment account");
-      }
       setCredentialValues({});
       loadAccounts();
     } catch (err) {
@@ -82,14 +68,7 @@ export default function CompanyPaymentSettings({ companyId, token }) {
   const handleVerify = async (accountId) => {
     setError("");
     try {
-      const res = await fetch(
-        `${API}/companies/${companyId}/payment-accounts/${accountId}/verify`,
-        { method: "POST", headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Verification failed");
-      }
+      await api.post(`/companies/${companyId}/payment-accounts/${accountId}/verify`);
       loadAccounts();
     } catch (err) {
       setError(err.message);

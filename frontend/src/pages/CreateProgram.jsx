@@ -1,11 +1,12 @@
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../context/AuthContext";
+import { useToast } from "../context/ToastContext";
 import SearchableSelect from "../components/SearchableSelect";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api, ApiError } from "../lib/api";
 
 export default function CreateProgram() {
   const { token } = useAuth();
+  const toast = useToast();
   const [step, setStep] = useState(1);
 
   const [form, setForm] = useState({
@@ -31,17 +32,9 @@ export default function CreateProgram() {
       setLoadingTypes(true);
       setTypesError("");
       try {
-        const res = await fetch(`${API}/types/?experience_type=program`);
-        
-        if (!res.ok) {
-          const errorText = await res.text();
-          console.error("Types API error:", errorText);
-          throw new Error(`API returned ${res.status}: ${errorText}`);
-        }
-        
-        const data = await res.json();
+        const data = await api.get(`/types/?experience_type=program`, { skipAuth: true });
         console.log("Program types loaded:", data);
-        
+
         if (!Array.isArray(data)) {
           throw new Error("API did not return an array");
         }
@@ -104,37 +97,11 @@ export default function CreateProgram() {
     try {
       const payload = { ...form, gallery };
       console.log("Sending payload:", payload);
-      
-      const res = await fetch(`${API}/programs/`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
 
-      if (!res.ok) {
-        const contentType = res.headers.get("content-type");
-        let errorMessage = `Error ${res.status}`;
-        
-        if (contentType && contentType.includes("application/json")) {
-          const j = await res.json();
-          console.error("Error response:", j);
-          errorMessage = j.detail || JSON.stringify(j);
-        } else {
-          const text = await res.text();
-          console.error("Error response (text):", text);
-          errorMessage = text || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const created = await res.json();
+      const created = await api.post("/programs/", payload);
       console.log("Program created:", created);
-      alert("Program created successfully!");
-      
+      toast.success("Program created successfully!");
+
       // Reset form
       setForm({
         title: "",

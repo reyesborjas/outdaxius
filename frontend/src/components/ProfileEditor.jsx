@@ -1,9 +1,7 @@
 // frontend/src/components/ProfileEditor.jsx
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-
-const API = (import.meta.env.VITE_API ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
-const join = (p) => `${API}${p.startsWith("/") ? "" : "/"}${p}`;
+import { api } from "../lib/api";
 
 export default function ProfileEditor() {
   const { token, user: sessionUser, refreshMe } = useAuth();
@@ -29,11 +27,9 @@ export default function ProfileEditor() {
   // ✅ Cargar info de empresa
   useEffect(() => {
     if (!token || me?.role !== "guide") return;
-    
-    fetch(join("/users/me/company-info"), {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.ok ? r.json() : null)
+
+    api
+      .get("/users/me/company-info")
       .then(data => setCompanyInfo(data))
       .catch(() => {});
   }, [token, me?.role]);
@@ -42,9 +38,8 @@ export default function ProfileEditor() {
     let ignore = false;
     (async () => {
       if (!token) return;
-      const res = await fetch(join("/users/me"), { headers: { Authorization: `Bearer ${token}` } });
-      if (!res.ok) return;
-      const data = await res.json();
+      const data = await api.get("/users/me").catch(() => null);
+      if (!data) return;
       if (!ignore) {
         const normalized = normalizeMe(data);
         setMe(normalized);
@@ -125,21 +120,7 @@ export default function ProfileEditor() {
       delete payload.id;
       delete payload.email;
 
-      const res = await fetch(join("/users/me"), {
-        method: "PATCH",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Error saving profile");
-      }
-
-      const updated = await res.json();
+      const updated = await api.patch("/users/me", payload);
       const normalized = normalizeMe(updated);
       setMe(normalized);
       setOriginalData(JSON.stringify(normalized));

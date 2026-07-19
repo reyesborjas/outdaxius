@@ -5,8 +5,8 @@ import { useAuth } from "../context/AuthContext";
 import { useCompany } from "../hooks/useCompany";
 import InviteGuideModal from "../components/InviteGuideModal";
 import CompanyPaymentSettings from "../components/CompanyPaymentSettings";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { useToast } from "../context/ToastContext";
+import { api } from "../lib/api";
 
 // Cascading hierarchy, lower number = more power (see app/core/permissions.py).
 const ROLE_LEVEL_LABELS = { 1: "Master guide", 2: "Planner", 3: "Coordinator", 4: "Field guide" };
@@ -15,6 +15,7 @@ export default function CompanyDashboard() {
   const { companyId } = useParams();
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  const toast = useToast();
   const {
     company,
     license,
@@ -50,13 +51,8 @@ export default function CompanyDashboard() {
   // Load teams
   useEffect(() => {
     if (!companyId || !token) return;
-    fetch(`${API}/companies/${companyId}/teams`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Error ${r.status}`);
-        return r.json();
-      })
+    api
+      .get(`/companies/${companyId}/teams`)
       .then(setTeams)
       .catch((err) => {
         console.error("Error loading teams:", err);
@@ -67,15 +63,10 @@ export default function CompanyDashboard() {
   // Load team members when team is selected
   useEffect(() => {
     if (!selectedTeam || !token) return;
-    
+
     setLoadingTeamMembers(true);
-    fetch(`${API}/companies/${companyId}/teams/${selectedTeam.id}/members`, {
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then((r) => {
-        if (!r.ok) throw new Error(`Error ${r.status}`);
-        return r.json();
-      })
+    api
+      .get(`/companies/${companyId}/teams/${selectedTeam.id}/members`)
       .then(setTeamMembers)
       .catch((err) => {
         console.error("Error loading team members:", err);
@@ -93,24 +84,10 @@ export default function CompanyDashboard() {
     }
     setCreatingTeam(true);
     try {
-      const res = await fetch(`${API}/companies/${companyId}/teams`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({ 
-          name: newTeamName,
-          description: newTeamDescription || null
-        }),
+      const newTeam = await api.post(`/companies/${companyId}/teams`, {
+        name: newTeamName,
+        description: newTeamDescription || null,
       });
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not create team");
-      }
-      
-      const newTeam = await res.json();
       setTeams(prev => [...prev, newTeam]);
       setNewTeamName("");
       setNewTeamDescription("");
@@ -125,38 +102,20 @@ export default function CompanyDashboard() {
     if (!selectedMemberToAdd) return;
     
     try {
-      const res = await fetch(
-        `${API}/companies/${companyId}/teams/${selectedTeam.id}/members`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ user_id: selectedMemberToAdd }),
-        }
-      );
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not add member");
-      }
-      
+      await api.post(`/companies/${companyId}/teams/${selectedTeam.id}/members`, {
+        user_id: selectedMemberToAdd,
+      });
+
       // Reload team members
-      const membersRes = await fetch(
-        `${API}/companies/${companyId}/teams/${selectedTeam.id}/members`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (membersRes.ok) {
-        const updatedMembers = await membersRes.json();
-        setTeamMembers(updatedMembers);
-      }
-      
+      const updatedMembers = await api
+        .get(`/companies/${companyId}/teams/${selectedTeam.id}/members`)
+        .catch(() => null);
+      if (updatedMembers) setTeamMembers(updatedMembers);
+
       setShowAddMemberModal(false);
       setSelectedMemberToAdd("");
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
     }
   };
 
@@ -164,52 +123,28 @@ export default function CompanyDashboard() {
     if (!window.confirm("Remove this member from the team?")) return;
     
     try {
-      const res = await fetch(
-        `${API}/companies/${companyId}/teams/${selectedTeam.id}/members/${memberId}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not remove member");
-      }
-      
+      await api.delete(`/companies/${companyId}/teams/${selectedTeam.id}/members/${memberId}`);
+
       // Update local state
       setTeamMembers(prev => prev.filter(m => m.id !== memberId));
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
     }
   };
 
   const handleRoleChange = async (memberId, newRoleLevel) => {
     const roleLevel = Number(newRoleLevel);
     try {
-      const res = await fetch(
-        `${API}/companies/${companyId}/teams/${selectedTeam.id}/members/${memberId}/role`,
-        {
-          method: "PATCH",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({ role_level: roleLevel }),
-        }
-      );
-
-      if (!res.ok) {
-        const errorData = await res.json().catch(() => ({}));
-        throw new Error(errorData.detail || "Could not update role");
-      }
+      await api.patch(`/companies/${companyId}/teams/${selectedTeam.id}/members/${memberId}/role`, {
+        role_level: roleLevel,
+      });
 
       // Update local state
       setTeamMembers(prev =>
         prev.map(m => (m.id === memberId ? { ...m, role_level: roleLevel } : m))
       );
     } catch (err) {
-      alert(`Error: ${err.message}`);
+      toast.error(`Error: ${err.message}`);
     }
   };
 
@@ -269,10 +204,8 @@ const [limitsData, setLimitsData] = useState(null);
 
 useEffect(() => {
   if (!companyId || !token) return;
-  fetch(`${API}/companies/${companyId}/limits`, {
-    headers: { Authorization: `Bearer ${token}` },
-  })
-    .then(r => r.ok ? r.json() : Promise.reject(r))
+  api
+    .get(`/companies/${companyId}/limits`)
     .then(setLimitsData)
     .catch(() => setLimitsData(null));
 }, [companyId, token]);

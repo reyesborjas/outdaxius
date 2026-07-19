@@ -1,11 +1,7 @@
 import React, { useState, useEffect } from "react";
-import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api, ApiError } from "../lib/api";
 
 export default function EditProgramModal({ program, onClose, onSaved, onDeleted }) {
-  const { token } = useAuth();
-
   const [form, setForm] = useState({
     title: "",
     description: "",
@@ -53,10 +49,8 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
   // carga actividades ya vinculadas
   useEffect(() => {
     if (!program?.id) return;
-    fetch(`${API}/programs/${program.id}/activities`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then((r) => (r.ok ? r.json() : []))
+    api
+      .get(`/programs/${program.id}/activities`)
       .then((data) => {
         setAssigned(data);
         const ids = data.map(a => a.id);
@@ -64,7 +58,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
         setOriginalIds(ids); // snapshot de DB
       })
       .catch(() => {});
-  }, [program?.id, token]);
+  }, [program?.id]);
 
   // helpers formulario/galería
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -84,10 +78,8 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
     }
     setSearching(true);
     try {
-      const r = await fetch(`${API}/activities/search?q=${encodeURIComponent(q)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      setResults(r.ok ? await r.json() : []);
+      const data = await api.get(`/activities/search?q=${encodeURIComponent(q)}`);
+      setResults(data || []);
     } catch {
       setResults([]);
     } finally {
@@ -129,78 +121,41 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
       console.log("Updating program with payload:", payload);
 
       // actualiza el programa
-      const res = await fetch(`${API}/programs/${program.id}`, {
-        method: "PUT",
-        headers: { 
-          "Content-Type": "application/json", 
-          Authorization: `Bearer ${token}` 
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (!res.ok) {
-        const contentType = res.headers.get("content-type");
-        let errorMessage = `Error ${res.status}`;
-        
-        if (contentType && contentType.includes("application/json")) {
-          const j = await res.json();
-          console.error("Error response:", j);
-          
-          // Manejar errores de validación de Pydantic
-          if (Array.isArray(j.detail)) {
-            errorMessage = j.detail.map(err => {
-              const field = Array.isArray(err.loc) ? err.loc.join('.') : 'unknown';
-              return `${field}: ${err.msg}`;
-            }).join('\n');
-          } else if (typeof j.detail === 'string') {
-            errorMessage = j.detail;
-          } else {
-            errorMessage = JSON.stringify(j.detail);
-          }
-        } else {
-          const text = await res.text();
-          console.error("Error response (text):", text);
-          errorMessage = text || errorMessage;
-        }
-        
-        throw new Error(errorMessage);
-      }
-
-      const updated = await res.json();
+      const updated = await api.put(`/programs/${program.id}`, payload);
 
       // diffs contra originalIds (DB en el momento de abrir)
       const toAdd = selectedActivities.filter((id) => !originalIds.includes(id));
       const toRemove = originalIds.filter((id) => !selectedActivities.includes(id));
 
       if (toAdd.length) {
-        const rAdd = await fetch(`${API}/programs/${program.id}/activities`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
-          body: JSON.stringify(toAdd), // array de UUIDs
-        });
-        if (!rAdd.ok) {
-          const addError = await rAdd.text();
-          throw new Error(`Error linking activities: ${addError}`);
+        try {
+          await api.post(`/programs/${program.id}/activities`, toAdd); // array de UUIDs
+        } catch (addErr) {
+          throw new Error(`Error linking activities: ${addErr.message}`);
         }
       }
 
       for (const id of toRemove) {
-        const rDel = await fetch(`${API}/programs/${program.id}/activities/${id}`, {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (!rDel.ok) {
+        try {
+          await api.delete(`/programs/${program.id}/activities/${id}`);
+        } catch {
           throw new Error(`Error unlinking activity ${id}`);
         }
       }
 
       onSaved?.(updated);
       onClose();
-    } catch (e) { 
-      setError(e.message);
+    } catch (e) {
+      let errorMsg = e.message || String(e);
+      if (e instanceof ApiError && Array.isArray(e.detail?.detail)) {
+        errorMsg = e.detail.detail
+          .map((err) => `${Array.isArray(err.loc) ? err.loc.join(".") : "unknown"}: ${err.msg}`)
+          .join("\n");
+      }
+      setError(errorMsg);
       console.error("Save error:", e);
-    } finally { 
-      setSaving(false); 
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -208,20 +163,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
     setDeleting(true);
     setError("");
     try {
-      const res = await fetch(`${API}/programs/${program.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) {
-        const t = await res.text();
-        let msg = null;
-        try {
-          msg = JSON.parse(t).detail;
-        } catch {
-          msg = null;
-        }
-        throw new Error(msg || `Error ${res.status}`);
-      }
+      await api.delete(`/programs/${program.id}`);
       onDeleted?.(program.id);
       onClose();
     } catch (e) {

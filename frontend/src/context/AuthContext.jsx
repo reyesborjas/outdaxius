@@ -1,7 +1,5 @@
-import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
-
-const API = (import.meta.env.VITE_API ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
-const join = (p) => `${API}${p.startsWith("/") ? "" : "/"}${p}`;
+import { createContext, useContext, useEffect, useMemo, useState } from "react";
+import { api, apiFetch, ApiError, getAuth, setAuth as persistAuth, clearAuth } from "../lib/api";
 
 const AuthContext = createContext(null);
 export const useAuth = () => useContext(AuthContext);
@@ -11,133 +9,108 @@ export function AuthProvider({ children }) {
   const [refresh, setRefresh] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const refreshing = useRef(null); // promesa en curso
 
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem("auth") || "null");
-      if (saved?.access) {
-        setAccess(saved.access);
-        setRefresh(saved.refresh || null);
-        setUser(saved.user || null);
-      }
-    } catch {}
+    const saved = getAuth();
+    if (saved?.access) {
+      setAccess(saved.access);
+      setRefresh(saved.refresh || null);
+      setUser(saved.user || null);
+    }
     setLoading(false);
+
+    // Fired by lib/api.js when a background token refresh fails.
+    const onAuthLogout = () => {
+      setAccess(null);
+      setRefresh(null);
+      setUser(null);
+    };
+    window.addEventListener("auth:logout", onAuthLogout);
+    return () => window.removeEventListener("auth:logout", onAuthLogout);
   }, []);
 
   const persist = (payload) => {
-    const v = { access: payload.access ?? access, refresh: payload.refresh ?? refresh, user: payload.user ?? user };
-    localStorage.setItem("auth", JSON.stringify(v));
+    persistAuth(payload);
     if (payload.access !== undefined) setAccess(payload.access);
     if (payload.refresh !== undefined) setRefresh(payload.refresh);
     if (payload.user !== undefined) setUser(payload.user);
   };
 
-  const fetchMe = async (tkn) => {
-    const res = await fetch(join("/users/me"), { headers: { Authorization: `Bearer ${tkn}`, Accept: "application/json" } });
-    if (!res.ok) return null;
-    return res.json();
+  const fetchMe = async () => {
+    try {
+      return await api.get("/users/me");
+    } catch {
+      return null;
+    }
   };
 
   const login = async (email, password) => {
-    const res = await fetch(join("/auth/login"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ email, password }),
-    });
-    if (!res.ok) {
-      const txt = await res.text().catch(() => "");
-      let detail = txt; try { detail = JSON.parse(txt).detail; } catch {}
-      throw new Error(detail || `Login failed ${res.status}`);
+    let data;
+    try {
+      data = await api.post("/auth/login", { email, password }, { skipAuth: true });
+    } catch (err) {
+      throw new Error(err instanceof ApiError ? err.message : `Login failed`);
     }
-    const data = await res.json(); // {access_token, refresh_token, token_type, user}
+    // {access_token, refresh_token, token_type, user}
     persist({ access: data.access_token, refresh: data.refresh_token, user: data.user });
 
     let merged = data.user;
-    try {
-      const me = await fetchMe(data.access_token);
-      if (me) {
-        merged = { ...(data.user || {}), ...me };
-        persist({ user: merged });
-      }
-    } catch {}
-    return merged;
-  };
-
-  const refreshOnce = async () => {
-    if (!refresh) return null;
-    if (!refreshing.current) {
-      refreshing.current = (async () => {
-        const r = await fetch(join("/auth/refresh"), {
-          method: "POST",
-          headers: { "Content-Type": "application/json", Accept: "application/json" },
-          body: JSON.stringify({ refresh_token: refresh }),
-        });
-        if (!r.ok) {
-          logout();
-          refreshing.current = null;
-          return null;
-        }
-        const d = await r.json(); // {access_token, refresh_token}
-        persist({ access: d.access_token, refresh: d.refresh_token });
-        refreshing.current = null;
-        return d.access_token;
-      })();
+    const me = await fetchMe();
+    if (me) {
+      merged = { ...(data.user || {}), ...me };
+      persist({ user: merged });
     }
-    return refreshing.current;
-  };
-
-  // Wrapper que renueva y reintenta 401 una sola vez
-  const fetchWithAuth = async (input, init = {}) => {
-    const res = await fetch(input, {
-      ...init,
-      headers: { ...(init.headers || {}), Authorization: access ? `Bearer ${access}` : undefined },
-    });
-    if (res.status !== 401) return res;
-    const newAccess = await refreshOnce();
-    if (!newAccess) return res;
-    return fetch(input, {
-      ...init,
-      headers: { ...(init.headers || {}), Authorization: `Bearer ${newAccess}` },
-    });
+    return merged;
   };
 
   const refreshMe = async () => {
     if (!access) return null;
-    const me = await fetchMe(access);
+    const me = await fetchMe();
     if (me) persist({ user: { ...(user || {}), ...me } });
     return me;
   };
 
   const logout = () => {
-    setAccess(null); setRefresh(null); setUser(null);
-    localStorage.removeItem("auth");
+    setAccess(null);
+    setRefresh(null);
+    setUser(null);
+    clearAuth();
   };
+
+  // Legacy wrapper kept for existing callers passing a full URL + init.
+  // Refresh-and-retry-once-on-401 now lives in lib/api.js's apiFetch.
+  const fetchWithAuth = async (input, init = {}) => apiFetch(input, init);
 
   // Password recovery
   const requestPasswordReset = async (email) => {
-    const r = await fetch(join("/auth/request-password-reset"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ email }),
-    });
-    if (!r.ok) throw new Error("No se pudo solicitar recuperación");
-    return r.json();
+    try {
+      return await api.post("/auth/request-password-reset", { email }, { skipAuth: true });
+    } catch {
+      throw new Error("No se pudo solicitar recuperación");
+    }
   };
 
   const resetPassword = async (token, new_password) => {
-    const r = await fetch(join("/auth/reset-password"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ token, new_password }),
-    });
-    if (!r.ok) throw new Error("No se pudo resetear la contraseña");
-    return r.json();
+    try {
+      return await api.post("/auth/reset-password", { token, new_password }, { skipAuth: true });
+    } catch {
+      throw new Error("No se pudo resetear la contraseña");
+    }
   };
 
   const value = useMemo(
-    () => ({ 
-      token: access, refresh, user, loading, login, logout, refreshMe, fetchWithAuth, requestPasswordReset, resetPassword }),
+    () => ({
+      token: access,
+      refresh,
+      user,
+      loading,
+      login,
+      logout,
+      refreshMe,
+      fetchWithAuth,
+      requestPasswordReset,
+      resetPassword,
+    }),
     [access, refresh, user, loading]
   );
 

@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 export default function Schedules() {
   const { token, loading } = useAuth();
@@ -20,25 +19,12 @@ export default function Schedules() {
 
   const fetchSchedules = async () => {
     try {
-      const [progSchedRes, actSchedRes, progRes, actRes] = await Promise.all([
-        fetch(`${API}/program-schedules/?mine_only=true`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API}/activity-schedules/?mine_only=true`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API}/programs/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
-        fetch(`${API}/activities/`, {
-          headers: { Authorization: `Bearer ${token}` },
-        }),
+      const [progSchedulesData, actSchedulesData, allPrograms, allActivities] = await Promise.all([
+        api.get(`/program-schedules/?mine_only=true`).catch(() => []),
+        api.get(`/activity-schedules/?mine_only=true`).catch(() => []),
+        api.get(`/programs/`).catch(() => []),
+        api.get(`/activities/`).catch(() => []),
       ]);
-
-      const progSchedulesData = progSchedRes.ok ? await progSchedRes.json() : [];
-      const actSchedulesData = actSchedRes.ok ? await actSchedRes.json() : [];
-      const allPrograms = progRes.ok ? await progRes.json() : [];
-      const allActivities = actRes.ok ? await actRes.json() : [];
 
       // Normalize Program Schedules
       const progNormalized = progSchedulesData.map((p) => {

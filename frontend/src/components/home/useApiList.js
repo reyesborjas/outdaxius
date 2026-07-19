@@ -1,8 +1,7 @@
 // src/components/home/useApiList.js
 
 import { useEffect, useState } from "react";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../../lib/api";
 
 export default function useApiList(path) {
   const [data, setData] = useState([]);
@@ -12,8 +11,8 @@ export default function useApiList(path) {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`${API}${path}`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+    api
+      .get(path, { skipAuth: true })
       .then((j) => alive && setData(Array.isArray(j) ? j : []))
       .catch(() => alive && setErr("Error"))
       .finally(() => alive && setLoading(false));

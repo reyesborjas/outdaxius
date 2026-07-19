@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { useToast } from "../context/ToastContext";
+import { api } from "../lib/api";
 
 function getStartTime(b, activitySchedules, programSchedules) {
   if (b.activity_schedule_id) {
@@ -16,7 +16,7 @@ function getStartTime(b, activitySchedules, programSchedules) {
 }
 
 /* --- Modal para subir voucher --- */
-function PayModal({ booking, token, onClose, onDone }) {
+function PayModal({ booking, onClose, onDone }) {
   const [amount, setAmount] = useState("");
   const [currency, setCurrency] = useState("USD");
   const [voucherUrl, setVoucherUrl] = useState("");
@@ -32,21 +32,12 @@ function PayModal({ booking, token, onClose, onDone }) {
     }
     setSubmitting(true);
     try {
-      const r = await fetch(`${API}/bookings/${booking.id}/pay`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          amount: Number(amount),
-          currency,
-          voucher_url: voucherUrl || null,
-          reference: reference || null,
-        }),
+      await api.post(`/bookings/${booking.id}/pay`, {
+        amount: Number(amount),
+        currency,
+        voucher_url: voucherUrl || null,
+        reference: reference || null,
       });
-      if (!r.ok) throw new Error(await r.text());
-      await r.json();
       onDone();
       onClose();
     } catch (e) {
@@ -125,6 +116,7 @@ function PayModal({ booking, token, onClose, onDone }) {
 /* --- Página principal --- */
 export default function Bookings() {
   const { token, loading } = useAuth();
+  const toast = useToast();
   const [bookings, setBookings] = useState([]);
   const [programSchedules, setProgramSchedules] = useState([]);
   const [activitySchedules, setActivitySchedules] = useState([]);
@@ -137,25 +129,19 @@ export default function Bookings() {
 
   const fetchData = async () => {
     try {
-      const [
-        bookingsRes,
-        progSchedRes,
-        actSchedRes,
-        progRes,
-        actRes,
-      ] = await Promise.all([
-        fetch(`${API}/bookings/`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/program-schedules/`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/activity-schedules/`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/programs/`, { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`${API}/activities/`, { headers: { Authorization: `Bearer ${token}` } }),
+      const [bookingsData, progSchedData, actSchedData, progData, actData] = await Promise.all([
+        api.get(`/bookings/`).catch(() => []),
+        api.get(`/program-schedules/`).catch(() => []),
+        api.get(`/activity-schedules/`).catch(() => []),
+        api.get(`/programs/`).catch(() => []),
+        api.get(`/activities/`).catch(() => []),
       ]);
 
-      setBookings(bookingsRes.ok ? await bookingsRes.json() : []);
-      setProgramSchedules(progSchedRes.ok ? await progSchedRes.json() : []);
-      setActivitySchedules(actSchedRes.ok ? await actSchedRes.json() : []);
-      setPrograms(progRes.ok ? await progRes.json() : []);
-      setActivities(actRes.ok ? await actRes.json() : []);
+      setBookings(bookingsData);
+      setProgramSchedules(progSchedData);
+      setActivitySchedules(actSchedData);
+      setPrograms(progData);
+      setActivities(actData);
     } catch (err) {
       console.error(err);
       setError("Error fetching bookings");
@@ -163,20 +149,16 @@ export default function Bookings() {
   };
 
   const cancelBooking = async (b) => {
-    const r = await fetch(`${API}/bookings/${b.id}/cancel`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (r.ok) {
-      const data = await r.json();
-      alert(
+    try {
+      const data = await api.post(`/bookings/${b.id}/cancel`);
+      toast.success(
         data.cancellation_fee && Number(data.cancellation_fee) > 0
           ? `Cancelado. Penalización: $${data.cancellation_fee}`
           : "Cancelado sin penalización"
       );
       fetchData();
-    } else {
-      alert("Error cancelando la reserva");
+    } catch {
+      toast.error("Error cancelando la reserva");
     }
   };
 
@@ -249,11 +231,7 @@ export default function Bookings() {
                                         participant={editingParticipant}
                                         onClose={() => setEditingParticipant(null)}
                                         onSave={async (updated) => {
-                                          await fetch(`${API}/bookings/${booking.id}/participants/${updated.id}`, {
-                                            method: 'PATCH',
-                                            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-                                            body: JSON.stringify(updated)
-                                          });
+                                          await api.patch(`/bookings/${booking.id}/participants/${updated.id}`, updated);
                                           setEditingParticipant(null);
                                           fetchData(); // refresca lista
                                         }}
@@ -284,7 +262,7 @@ export default function Bookings() {
         </div>
 
         {paying && (
-          <PayModal booking={paying} token={token} onClose={() => setPaying(null)} onDone={fetchData} />
+          <PayModal booking={paying} onClose={() => setPaying(null)} onDone={fetchData} />
         )}
       </main>
     </div>

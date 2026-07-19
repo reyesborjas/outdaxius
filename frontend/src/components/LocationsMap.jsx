@@ -2,8 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
 import AutoZoom from "./AutoZoom";
 import L from "leaflet";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api } from "../lib/api";
 
 const icon = new L.Icon({
   iconUrl: "https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png",
@@ -22,8 +21,8 @@ export default function LocationsMap() {
   useEffect(() => {
     let alive = true;
     setLoading(true);
-    fetch(`${API}/locations`)
-      .then((r) => (r.ok ? r.json() : Promise.reject(r)))
+    api
+      .get(`/locations`, { skipAuth: true })
       .then((j) => alive && setLocations(Array.isArray(j) ? j : []))
       .catch(() => alive && setLocations([]))
       .finally(() => alive && setLoading(false));

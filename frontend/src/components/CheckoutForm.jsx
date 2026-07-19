@@ -1,6 +1,7 @@
 // frontend/src/components/CheckoutForm.jsx
 import { loadStripe } from '@stripe/stripe-js';
 import { Elements, PaymentElement, useStripe, useElements } from '@stripe/react-stripe-js';
+import { api } from '../lib/api';
 
 const stripePromise = loadStripe(import.meta.env.VITE_STRIPE_PUBLIC_KEY);
 
@@ -58,11 +59,8 @@ export default function BookingCheckout({ booking }) {
   const { token } = useAuth();
 
   useEffect(() => {
-    fetch(`${API}/payments/stripe/bookings/${booking.id}/create-payment-intent`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}` }
-    })
-      .then(r => r.json())
+    api
+      .post(`/payments/stripe/bookings/${booking.id}/create-payment-intent`)
       .then(data => setClientSecret(data.client_secret));
   }, [booking.id, token]);
 

@@ -1,8 +1,7 @@
 // frontend/src/pages/Register.jsx
 import React, { useMemo, useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-
-const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
+import { api, ApiError } from "../lib/api";
 
 const preventEnterSubmit = (e) => {
   if (e.key === "Enter") e.preventDefault();
@@ -125,26 +124,18 @@ export default function Register() {
     }
 
     try {
-      const res = await fetch(`${API}/auth/register`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        let msg = "Registration failed";
-        if (Array.isArray(data.detail)) {
-          msg = data.detail.map((d) => d.msg).join(", ");
-        } else if (typeof data.detail === "string") {
-          msg = data.detail;
-        }
-        setError(msg);
-        return;
-      }
+      await api.post("/auth/register", payload, { skipAuth: true });
       navigate("/login");
-    } catch {
-      setError("Network error. Try again.");
+    } catch (err) {
+      let msg = "Registration failed";
+      if (err instanceof ApiError && Array.isArray(err.detail?.detail)) {
+        msg = err.detail.detail.map((d) => d.msg).join(", ");
+      } else if (err instanceof ApiError) {
+        msg = err.message;
+      } else {
+        msg = "Network error. Try again.";
+      }
+      setError(msg);
     }
   };
 

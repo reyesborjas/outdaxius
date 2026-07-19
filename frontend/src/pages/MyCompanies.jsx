@@ -2,9 +2,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
-
-const API = (import.meta.env.VITE_API ?? "http://127.0.0.1:8000/api").replace(/\/$/, "");
-const join = (p) => `${API}${p.startsWith("/") ? "" : "/"}${p}`;
+import { api } from "../lib/api";
 
 export default function MyCompanies() {
   const { token, user } = useAuth();
@@ -18,13 +16,7 @@ export default function MyCompanies() {
     
     const fetchCompanies = async () => {
       try {
-        const res = await fetch(join("/companies"), {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        
-        if (!res.ok) throw new Error(`Error ${res.status}`);
-        
-        const data = await res.json();
+        const data = await api.get("/companies");
         setCompanies(data);
       } catch (err) {
         setError(err.message);
