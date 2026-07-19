@@ -11,8 +11,10 @@ class Payment(Base):
     booking_id = Column(UUID(as_uuid=True), ForeignKey("bookings.id", ondelete="CASCADE"))
     method_id  = Column(UUID(as_uuid=True), nullable=True)  # opcional en MVP
     amount   = Column(Numeric(12,2), nullable=False)
-    currency = Column(String, nullable=False, default="USD")
-    status   = Column(String, nullable=False, default="pending")  # pending|confirmed|rejected
+    currency = Column(String(3), nullable=False, default="USD")
+    status   = Column(String, nullable=False, default="pending")  # payment_status enum: pending|succeeded|failed|refunded|partially_refunded
+    provider = Column(String, nullable=True)      # e.g. "flow" -- null for the manual voucher-upload path
+    provider_ref = Column(String, nullable=True)  # provider's own payment/token id, for idempotent webhook lookups
     voucher_url = Column(String, nullable=True)
     reference   = Column(String, nullable=True)
     created_at = Column(DateTime, server_default=func.now())

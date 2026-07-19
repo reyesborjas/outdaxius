@@ -1,6 +1,6 @@
 # app/models/booking.py
 import uuid
-from sqlalchemy import Column, ForeignKey, String, DateTime, Integer
+from sqlalchemy import Column, ForeignKey, String, DateTime, Integer, Numeric
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.sql import func
 from app.db.base import Base
@@ -15,7 +15,10 @@ class Booking(Base):
     activity_schedule_id = Column(UUID(as_uuid=True), ForeignKey("activity_schedules.id", ondelete="CASCADE"), nullable=True)
 
     status = Column(String, default="pending")          # pending | confirmed | cancelled
-    attendance_status = Column(String, nullable=True)   # attended | no-show
+    # NOT NULL DEFAULT 'not_attended' since the Phase 2 migration -- the Python-side default
+    # matters because SQLAlchemy sends an explicit NULL on insert otherwise, which overrides the
+    # server-side DEFAULT and violates the NOT NULL constraint.
+    attendance_status = Column(String, nullable=False, default="not_attended")
 
     participants_count = Column(Integer, nullable=False, default=1)
     # [{first_name,last_name,id_type,id_number,birth_date}]
@@ -26,4 +29,16 @@ class Booking(Base):
 
     cancelled_at = Column(DateTime, nullable=True)
     cancellation_fee = Column(Integer, nullable=True)
+
+    # Added by the Phase 2 migration but not previously mapped on the ORM -- Phase 4 is the first
+    # phase that actually reads/writes them.
+    cancelled_by = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=True)
+    cancelled_by_party = Column(String, nullable=True)  # client | vendor | system
+    cancellation_reason = Column(String, nullable=True)
+    refund_amount = Column(Numeric(12, 2), nullable=True)
+    refund_status = Column(String, nullable=True)  # not_required | pending | succeeded | failed | manual
+    refund_reference = Column(String, nullable=True)
+    # Cancellation policy frozen at purchase time (see app.services.cancellation) so a later
+    # policy change never alters a contract the client already agreed to.
+    policy_snapshot = Column(JSONB, nullable=False, default=dict)
 

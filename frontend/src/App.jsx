@@ -32,6 +32,7 @@ import CreateCompany from "./pages/CreateCompany";
 import MyCompanies from "./pages/MyCompanies";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import AcceptInvitation from "./pages/AcceptInvitation";
+import RefundQueue from "./pages/RefundQueue";
 
 export default function App() {
   return (
@@ -67,6 +68,7 @@ export default function App() {
           <Route element={<ProtectedRoute roles={["admin"]} />}>
             <Route path="users" element={<ManageUsers />} />
             <Route path="reports" element={<Reports />} />
+            <Route path="refunds" element={<RefundQueue />} />
           </Route>
 
           {/* Shared */}

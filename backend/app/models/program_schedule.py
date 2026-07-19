@@ -18,8 +18,12 @@ class ProgramSchedule(Base):
     status = Column(String, default="pending", nullable=False)
     min_participants = Column(Integer, nullable=True)
     max_participants = Column(Integer, nullable=True)
-    
       # valores: pending | confirmed | canceled
+
+    # Added by the Phase 2 migration but not previously mapped on the ORM.
+    selling_company_id = Column(UUID(as_uuid=True), ForeignKey("company.id"), nullable=True)
+    settlement_discount_type = Column(String, nullable=True)   # percent | fixed
+    settlement_discount_value = Column(Numeric(12, 2), nullable=True)
 
     program = relationship("Program", back_populates="schedules")
     activity_schedules = relationship(

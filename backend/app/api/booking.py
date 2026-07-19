@@ -15,6 +15,7 @@ from app.models.payment import Payment
 from app.schemas.payment import PaymentCreate, PaymentOut
 from app.services.company_usage import companies_for_program_schedule, companies_for_activity_schedule
 from app.services.enforce_limits import enforce_company_monthly_booking_limits
+from app.services.cancellation import build_policy_snapshot
 router = APIRouter()
 
 @router.get("/", response_model=List[BookingOut])
@@ -78,6 +79,7 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db), curren
             status="pending",
             participants_count=seats_requested,
             participants=participants,
+            policy_snapshot=build_policy_snapshot(),
         )
         db.add(booking)
         db.commit()
@@ -109,6 +111,7 @@ def create_booking(payload: BookingCreate, db: Session = Depends(get_db), curren
         status="pending",
         participants_count=seats_requested,
         participants=participants,
+        policy_snapshot=build_policy_snapshot(),
     )
     db.add(booking)
     db.commit()

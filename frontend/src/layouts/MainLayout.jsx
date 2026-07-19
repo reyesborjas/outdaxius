@@ -60,6 +60,7 @@ export default function MainLayout() {
             <Link to={`/main/${email}/create-schedule`} className="nav-link mb-2 role-link">Create Schedule</Link>
             <Link to={`/main/${email}/users`} className="nav-link mb-2 role-link">Manage Users</Link>
             <Link to={`/main/${email}/reports`} className="nav-link mb-2 role-link">Reports</Link>
+            <Link to={`/main/${email}/refunds`} className="nav-link mb-2 role-link">Refund Queue</Link>
 
           </>
         )}

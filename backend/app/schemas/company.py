@@ -44,7 +44,6 @@ class CompanyOut(CompanyBase):
     createdat: datetime
     updatedat: datetime
     license_tier: str
-    max_guides: int
     is_active: bool
     subscription_expires_at: Optional[datetime] = None
     current_guides_count: Optional[int] = None

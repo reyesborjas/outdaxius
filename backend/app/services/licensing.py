@@ -15,10 +15,11 @@ def _normalize_tier(tier: str | None) -> str:
     return t
 
 class LicenseManager:
-    """Manages company licensing and guide limits (max_guides is persisted in DB)."""
+    """Manages company licensing and guide limits. Per spec 2.9, company.max_guides was dropped
+    from the database -- "limits live in plan_limits configuration, not in a database column, so
+    pricing changes need no migration." This table is that configuration."""
 
-    # fallback only if a row somehow has max_guides NULL
-    TIER_FALLBACK_MAX_GUIDES = {
+    TIER_MAX_GUIDES = {
         "basic": 5,
         "pro": 50,
         "enterprise": None,
@@ -36,9 +37,7 @@ class LicenseManager:
         ).scalar()
 
         tier = normalize_tier(company.license_tier)
-
-        # IMPORTANT: guides limit comes from DB field (per your MVP rule)
-        max_guides = company.max_guides
+        max_guides = LicenseManager.TIER_MAX_GUIDES.get(tier, LicenseManager.TIER_MAX_GUIDES["basic"])
 
         return {
             "tier": tier,

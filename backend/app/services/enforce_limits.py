@@ -7,6 +7,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.models.company import Company
+from app.models.company_payment_account import CompanyPaymentAccount
 from app.services.plan_limits import get_limits_for_tier
 from app.services.company_usage import historical_usage, monthly_usage, month_window_utc
 
@@ -38,6 +39,25 @@ def enforce_company_creation_limits(db: Session, company_id: UUID, metric: str):
             402,
             detail=f"Plan limit reached for {metric}: {cur}/{lim}. Upgrade to increase capacity."
         )
+
+def enforce_charges_enabled(db: Session, company_id: UUID):
+    """
+    A company cannot publish a sellable schedule until it has completed payment onboarding
+    (company_payment_accounts.charges_enabled = true for at least one provider). This state did
+    not exist in the app before Phase 4 -- see app/api/company_payments.py for the onboarding
+    endpoints that set it.
+    """
+    has_charges_enabled = db.query(CompanyPaymentAccount).filter(
+        CompanyPaymentAccount.company_id == company_id,
+        CompanyPaymentAccount.charges_enabled == True,  # noqa: E712
+    ).first()
+    if not has_charges_enabled:
+        raise HTTPException(
+            402,
+            detail="This company must complete payment onboarding (a verified payment account) "
+                   "before publishing a sellable schedule."
+        )
+
 
 def enforce_company_monthly_booking_limits(db: Session, company_id: UUID, seats_requested: int):
     company = db.query(Company).filter(Company.id == company_id).first()

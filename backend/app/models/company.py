@@ -29,9 +29,10 @@ class Company(Base):
     address = Column(Text, nullable=False)
     entity_type = Column(Text, nullable=False)
     
-    # 🔥 NEW: Licensing fields
+    # Licensing fields. max_guides was dropped by the Phase 2 migration (spec 2.9: "limits move
+    # to plan_limits configuration, not a database column") -- see app.services.licensing for the
+    # tier-based replacement.
     license_tier = Column(String(20), nullable=False, default='free')
-    max_guides = Column(Integer, nullable=False, default=5)
     is_active = Column(Boolean, nullable=False, default=True)
     subscription_expires_at = Column(DateTime, nullable=True)
     

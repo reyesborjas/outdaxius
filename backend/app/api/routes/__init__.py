@@ -12,11 +12,11 @@ from app.api import program_schedules, activity_schedules
 from app.api import booking
 from app.api import types
 from app.api import companymember
-# NOTE: app.api.payment_stripe is intentionally NOT registered. It targets a Stripe-Connect
-# marketplace architecture (destination charges, company.stripe_account_id) that the current
-# spec rejects in favor of per-company merchant-of-record + Flow-first (see spec Phase 4). It
-# also references model columns that don't exist and writes invalid payment_status enum values.
-# Rebuilding it is Phase 4 scope (services/payments/base.py, services/payments/flow.py).
+from app.api import company_payments, payments_flow
+# NOTE: app.api.payment_stripe is intentionally NOT registered and remains unmounted dead code.
+# It targeted a Stripe-Connect marketplace architecture (destination charges,
+# company.stripe_account_id) that the spec rejects in favor of per-company merchant-of-record +
+# Flow-first. The real replacement is company_payments.py + payments_flow.py, below (Phase 4).
 
 router = APIRouter()
 
@@ -30,6 +30,8 @@ router.include_router(types.router, prefix="/types", tags=["types"])
 # ✅ CRÍTICO: Esta línea debe estar presente
 router.include_router(company_router)
 router.include_router(companymember.router)
+router.include_router(company_payments.router)
+router.include_router(payments_flow.router)
 
 # New schedule structure
 router.include_router(program_schedules.router, prefix="/program-schedules", tags=["program-schedules"])

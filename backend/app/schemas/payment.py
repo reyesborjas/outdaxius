@@ -15,7 +15,8 @@ class PaymentOut(BaseModel):
     booking_id: uuid.UUID
     amount: Decimal
     currency: str
-    status: Literal["pending","confirmed","rejected"]
+    status: Literal["pending", "succeeded", "failed", "refunded", "partially_refunded"]
+    provider: Optional[str] = None
     voucher_url: Optional[str] = None
     reference: Optional[str] = None
     class Config:

@@ -813,7 +813,7 @@ def get_company_limits_and_usage(
         tier=tier,
         as_of=datetime.now(timezone.utc),
         limits=LimitsOut(
-            guides_max=db_company.max_guides,
+            guides_max=LicenseManager.TIER_MAX_GUIDES.get(tier, LicenseManager.TIER_MAX_GUIDES["basic"]),
             max_activities=tier_limits.max_activities,
             max_programs=tier_limits.max_programs,
             max_schedules_total=tier_limits.max_schedules_total,

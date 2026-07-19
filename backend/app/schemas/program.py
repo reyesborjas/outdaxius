@@ -24,3 +24,4 @@ class ProgramCreate(BaseModel):
     gallery: Optional[List[dict]]
     min_activities: Optional[int]
     program_type: UUID
+    guide_leader: Optional[UUID] = None

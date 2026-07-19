@@ -4,6 +4,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useCompany } from "../hooks/useCompany";
 import InviteGuideModal from "../components/InviteGuideModal";
+import CompanyPaymentSettings from "../components/CompanyPaymentSettings";
 
 const API = import.meta.env.VITE_API || "http://127.0.0.1:8000/api";
 
@@ -625,6 +626,8 @@ Select a team to view members
       </div>
     </div>
   )}
+
+  {isAdmin && <CompanyPaymentSettings companyId={companyId} token={token} />}
 
   {/* Invite Modal */}
   {showInviteModal && (
