@@ -34,7 +34,10 @@ def create_program_schedule(
     # marked is_shared.
     creator_membership = get_user_team_membership(db, current_user.id)
     creator_team_id = creator_membership.team_id if creator_membership else None
-    if program.team_id and creator_team_id and program.team_id != creator_team_id:
+    # NOTE: do not gate this on `creator_team_id` being truthy -- an unaffiliated guide (no team
+    # at all) has no home team to justify reuse under, so this must still run and deny for them.
+    # check_can_reuse() already returns False when creator_team_id is None.
+    if program.team_id and program.team_id != creator_team_id:
         if not check_can_reuse(db, creator_team_id, program.team_id, program.is_shared):
             raise HTTPException(
                 status_code=403,
