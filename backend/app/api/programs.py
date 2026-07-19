@@ -17,7 +17,7 @@ from app.models.activity import Activity
 from app.models.programactivity import ProgramActivity
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
-from app.core.permissions import require_action, check_permission, get_user_team_membership
+from app.core.permissions import require_action, check_permission, check_permission_for_resource, get_user_team_membership
 
 
 router = APIRouter()
@@ -74,8 +74,11 @@ def create_program(
         if not leader:
             raise HTTPException(status_code=404, detail="Guide leader not found")
 
-    # require_action already confirmed the caller has role_level 1 in some team, so this is
-    # always resolvable here.
+    # require_action confirms sufficient role_level IF the caller has a team -- but a platform
+    # admin bypasses that check entirely (see check_permission) and has no TeamMember row at all.
+    # A program with no owning team can never be protected by the reuse policy, so force it
+    # is_shared rather than let it silently become unprotected private content (see the
+    # 2026-07-19 production incident: 13 legacy programs ended up exactly like this).
     membership = get_user_team_membership(db, user.id)
 
     prog = Program(
@@ -85,8 +88,8 @@ def create_program(
         created_by=user.id,
         guide_leader=guide_leader_id,  # 🔥 NUEVO
         gallery=payload.gallery or [],
-        team_id=membership.team_id,
-        is_shared=payload.is_shared,
+        team_id=membership.team_id if membership else None,
+        is_shared=payload.is_shared if membership else True,
     )
     db.add(prog)
     db.commit()
@@ -104,7 +107,7 @@ def update_program(
     program = db.query(Program).filter(Program.id == program_id).first()
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
-    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
+    if not check_permission_for_resource(db, current_user, "program.edit", program.team_id, program.created_by):
         raise HTTPException(status_code=403, detail="Not allowed")
 
     update_data = payload.dict(exclude_unset=True)
@@ -137,7 +140,7 @@ def delete_program(
     p = db.query(Program).filter(Program.id == program_id).first()
     if not p:
         raise HTTPException(status_code=404, detail="Program not found")
-    if not check_permission(db, current_user, "program.delete", team_id=p.team_id):
+    if not check_permission_for_resource(db, current_user, "program.delete", p.team_id, p.created_by):
         raise HTTPException(status_code=403, detail="Not allowed")
     db.delete(p)
     db.commit()
@@ -183,9 +186,9 @@ def link_activities_to_program(
         raise HTTPException(status_code=404, detail="Program not found")
     
     # Verificar permisos
-    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
+    if not check_permission_for_resource(db, current_user, "program.edit", program.team_id, program.created_by):
         raise HTTPException(status_code=403, detail="Not allowed to modify this program")
-    
+
     # Verificar que todas las actividades existen
     activities = db.query(Activity).filter(Activity.id.in_(activity_ids)).all()
     found_ids = {a.id for a in activities}
@@ -240,9 +243,9 @@ def unlink_activity_from_program(
         raise HTTPException(status_code=404, detail="Program not found")
     
     # Verificar permisos
-    if not check_permission(db, current_user, "program.edit", team_id=program.team_id):
+    if not check_permission_for_resource(db, current_user, "program.edit", program.team_id, program.created_by):
         raise HTTPException(status_code=403, detail="Not allowed to modify this program")
-    
+
     # Buscar y eliminar el vínculo
     link = db.query(ProgramActivity).filter(
         ProgramActivity.program_id == program_id,

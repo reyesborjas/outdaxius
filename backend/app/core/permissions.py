@@ -90,6 +90,27 @@ def check_permission(
     return membership.role_level <= required_level
 
 
+def check_permission_for_resource(
+    db: Session,
+    user: User,
+    action: str,
+    team_id: Optional[UUID],
+    created_by: UUID,
+) -> bool:
+    """
+    Like check_permission, but for editing/deleting an EXISTING resource that may have no
+    owning team (team_id is None -- orphaned legacy content; see the 2026-07-19 production
+    incident where content created by a teamless user, notably platform admins, ended up with
+    no team_id at all). A None team_id must never fall through to check_permission's
+    "no team constraint" branch -- that branch exists only for pre-creation checks, per its own
+    docstring. An ownerless resource may only be touched by its original creator or a platform
+    admin, never by an arbitrary team member elsewhere who happens to have sufficient role_level.
+    """
+    if team_id is None:
+        return user.role == "admin" or user.id == created_by
+    return check_permission(db, user, action, team_id=team_id)
+
+
 def require_action(action: str):
     """
     FastAPI dependency for CREATE endpoints, where the resource will belong to the caller's own
