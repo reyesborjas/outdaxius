@@ -33,6 +33,7 @@ import MyCompanies from "./pages/MyCompanies";
 import CompanyDashboard from "./pages/CompanyDashboard";
 import AcceptInvitation from "./pages/AcceptInvitation";
 import RefundQueue from "./pages/RefundQueue";
+import MembershipRequests from "./pages/MembershipRequests";
 
 export default function App() {
   return (
@@ -62,6 +63,7 @@ export default function App() {
           <Route path="companies" element={<MyCompanies />} />
           <Route path="create-company" element={<CreateCompany />} />
           <Route path="company/:companyId" element={<CompanyDashboard />} />
+          <Route path="membership-requests" element={<MembershipRequests />} />
 
           {/* Admin */}
           <Route path="admin-home" element={<AdminHome />} />

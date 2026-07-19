@@ -13,6 +13,7 @@ from app.api import booking
 from app.api import types
 from app.api import companymember
 from app.api import company_payments, payments_flow
+from app.api import membership_requests
 # NOTE: app.api.payment_stripe is intentionally NOT registered and remains unmounted dead code.
 # It targeted a Stripe-Connect marketplace architecture (destination charges,
 # company.stripe_account_id) that the spec rejects in favor of per-company merchant-of-record +
@@ -32,6 +33,7 @@ router.include_router(company_router)
 router.include_router(companymember.router)
 router.include_router(company_payments.router)
 router.include_router(payments_flow.router)
+router.include_router(membership_requests.router)
 
 # New schedule structure
 router.include_router(program_schedules.router, prefix="/program-schedules", tags=["program-schedules"])

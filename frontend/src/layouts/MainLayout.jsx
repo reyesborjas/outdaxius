@@ -78,6 +78,7 @@ export default function MainLayout() {
             <Link to={`/main/${email}/profile`} className="nav-link mb-2 role-link">My Profile</Link>
             <Link to={`/main/${email}/users`} className="nav-link mb-2 role-link">Manage Users</Link>
             <Link to={`/main/${email}/companies`} className="nav-link mb-2 role-link">My Companies</Link>
+            <Link to={`/main/${email}/membership-requests`} className="nav-link mb-2 role-link">Team Membership</Link>
           </>
         )}
 

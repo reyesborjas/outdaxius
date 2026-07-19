@@ -44,6 +44,15 @@ export default function CompanyDashboard() {
   const [showAddMemberModal, setShowAddMemberModal] = useState(false);
   const [selectedMemberToAdd, setSelectedMemberToAdd] = useState("");
 
+  // Invite an outside guide (not yet a company member) to this team via membership_requests
+  const [showInviteExternalModal, setShowInviteExternalModal] = useState(false);
+  const [inviteExternalEmail, setInviteExternalEmail] = useState("");
+  const [inviteExternalLevel, setInviteExternalLevel] = useState(4);
+  const [inviteExternalMessage, setInviteExternalMessage] = useState("");
+  const [invitingExternal, setInvitingExternal] = useState(false);
+
+  const [limitsData, setLimitsData] = useState(null);
+
   const isAdmin = members.some(
     (m) => m.userid === user?.id && m.is_admin && m.is_active
   );
@@ -74,6 +83,18 @@ export default function CompanyDashboard() {
       })
       .finally(() => setLoadingTeamMembers(false));
   }, [selectedTeam, companyId, token]);
+
+  useEffect(() => {
+    if (companyId) localStorage.setItem("activeCompanyId", companyId);
+  }, [companyId]);
+
+  useEffect(() => {
+    if (!companyId || !token) return;
+    api
+      .get(`/companies/${companyId}/limits`)
+      .then(setLimitsData)
+      .catch(() => setLimitsData(null));
+  }, [companyId, token]);
 
   const handleCreateTeam = async (e) => {
     e.preventDefault();
@@ -129,6 +150,28 @@ export default function CompanyDashboard() {
       setTeamMembers(prev => prev.filter(m => m.id !== memberId));
     } catch (err) {
       toast.error(`Error: ${err.message}`);
+    }
+  };
+
+  const handleInviteExternal = async () => {
+    if (!inviteExternalEmail.trim() || !selectedTeam) return;
+    setInvitingExternal(true);
+    try {
+      await api.post("/membership-requests/invite", {
+        team_id: selectedTeam.id,
+        target_email: inviteExternalEmail.trim(),
+        offered_level: Number(inviteExternalLevel),
+        message: inviteExternalMessage.trim() || null,
+      });
+      toast.success(`Invitation sent to ${inviteExternalEmail.trim()}`);
+      setShowInviteExternalModal(false);
+      setInviteExternalEmail("");
+      setInviteExternalLevel(4);
+      setInviteExternalMessage("");
+    } catch (err) {
+      toast.error(`Error: ${err.message}`);
+    } finally {
+      setInvitingExternal(false);
     }
   };
 
@@ -195,20 +238,6 @@ export default function CompanyDashboard() {
       </div>
     );
   }
-
-  useEffect(() => {
-  if (companyId) localStorage.setItem("activeCompanyId", companyId);
-}, [companyId]);
-
-const [limitsData, setLimitsData] = useState(null);
-
-useEffect(() => {
-  if (!companyId || !token) return;
-  api
-    .get(`/companies/${companyId}/limits`)
-    .then(setLimitsData)
-    .catch(() => setLimitsData(null));
-}, [companyId, token]);
 
   return (
     <div className="container py-4">
@@ -398,13 +427,21 @@ useEffect(() => {
                   <div className="d-flex justify-content-between align-items-center mb-3">
                     <h5 className="mb-0">Members of {selectedTeam.name}</h5>
                     {isAdmin && (
-                      <button
-                        className="btn btn-sm btn-primary"
-                        onClick={() => setShowAddMemberModal(true)}
-                        disabled={availableGuides.length === 0}
-                      >
-                        + Add Member
-                      </button>
+                      <div className="d-flex gap-2">
+                        <button
+                          className="btn btn-sm btn-outline-primary"
+                          onClick={() => setShowInviteExternalModal(true)}
+                        >
+                          + Invite External Guide
+                        </button>
+                        <button
+                          className="btn btn-sm btn-primary"
+                          onClick={() => setShowAddMemberModal(true)}
+                          disabled={availableGuides.length === 0}
+                        >
+                          + Add Member
+                        </button>
+                      </div>
                     )}
                   </div>
 
@@ -618,6 +655,70 @@ Select a team to view members
             disabled={!selectedMemberToAdd}
           >
             Add Member
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+)}
+
+{/* Invite External Guide Modal */}
+{showInviteExternalModal && (
+  <div className="modal show d-block" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
+    <div className="modal-dialog">
+      <div className="modal-content">
+        <div className="modal-header">
+          <h5 className="modal-title">Invite external guide to {selectedTeam?.name}</h5>
+          <button className="btn-close" onClick={() => setShowInviteExternalModal(false)}></button>
+        </div>
+        <div className="modal-body">
+          <p className="text-muted small">
+            Invites a guide who isn't a company member yet directly onto this team. They'll see it
+            under "Team Membership" once they sign in.
+          </p>
+          <div className="mb-2">
+            <label className="form-label small">Guide email *</label>
+            <input
+              type="email"
+              className="form-control"
+              value={inviteExternalEmail}
+              onChange={(e) => setInviteExternalEmail(e.target.value)}
+              placeholder="guide@example.com"
+            />
+          </div>
+          <div className="mb-2">
+            <label className="form-label small">Role level</label>
+            <select
+              className="form-select"
+              value={inviteExternalLevel}
+              onChange={(e) => setInviteExternalLevel(e.target.value)}
+            >
+              <option value={1}>{ROLE_LEVEL_LABELS[1]}</option>
+              <option value={2}>{ROLE_LEVEL_LABELS[2]}</option>
+              <option value={3}>{ROLE_LEVEL_LABELS[3]}</option>
+              <option value={4}>{ROLE_LEVEL_LABELS[4]}</option>
+            </select>
+          </div>
+          <div className="mb-2">
+            <label className="form-label small">Message (optional)</label>
+            <textarea
+              className="form-control"
+              rows={2}
+              value={inviteExternalMessage}
+              onChange={(e) => setInviteExternalMessage(e.target.value)}
+            />
+          </div>
+        </div>
+        <div className="modal-footer">
+          <button className="btn btn-secondary" onClick={() => setShowInviteExternalModal(false)}>
+            Cancel
+          </button>
+          <button
+            className="btn btn-primary"
+            onClick={handleInviteExternal}
+            disabled={invitingExternal || !inviteExternalEmail.trim()}
+          >
+            {invitingExternal ? "Sending…" : "Send Invitation"}
           </button>
         </div>
       </div>
