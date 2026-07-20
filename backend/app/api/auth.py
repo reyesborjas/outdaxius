@@ -12,6 +12,7 @@ from app.core.security import (
     get_password_hash, verify_password,
     create_token, decode_token, rotate_refresh,
 )
+from app.services.personal_team import ensure_personal_team
 
 router = APIRouter()
 
@@ -128,6 +129,13 @@ def register(payload: RegisterIn, db: Session = Depends(get_db)):
     db.add(user)
     db.commit()
     db.refresh(user)
+
+    # Every guide always holds a team -- see app.services.personal_team for why. Travelers
+    # ("user" role) and admins (created out-of-band, never through this endpoint) don't need one.
+    if user.role == "guide":
+        ensure_personal_team(db, user)
+        db.commit()
+
     return user
 
 # ======== Login con rate-limit ========
