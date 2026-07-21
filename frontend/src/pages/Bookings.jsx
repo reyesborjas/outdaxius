@@ -3,18 +3,6 @@ import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
 
-function getStartTime(b, activitySchedules, programSchedules) {
-  if (b.activity_schedule_id) {
-    const s = activitySchedules.find((x) => x.id === b.activity_schedule_id);
-    return s?.start_time ? new Date(s.start_time) : null;
-  }
-  if (b.program_schedule_id) {
-    const s = programSchedules.find((x) => x.id === b.program_schedule_id);
-    return s?.start_time ? new Date(s.start_time) : null;
-  }
-  return null;
-}
-
 /* --- Modal para subir voucher --- */
 function PayModal({ booking, onClose, onDone }) {
   const [amount, setAmount] = useState("");
@@ -113,10 +101,82 @@ function PayModal({ booking, onClose, onDone }) {
   );
 }
 
+const REFUND_BADGE = {
+  manual: "bg-warning",
+  succeeded: "bg-success",
+  failed: "bg-danger",
+  not_required: "bg-secondary",
+};
+
+/* --- Modal de confirmación de cancelación --- */
+function CancelModal({ booking, onClose, onDone }) {
+  const [reason, setReason] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [err, setErr] = useState("");
+  const toast = useToast();
+
+  const submit = async () => {
+    setSubmitting(true);
+    setErr("");
+    try {
+      const data = await api.post(`/bookings/${booking.id}/cancel`, { reason: reason.trim() || null });
+      const fee = Number(data.cancellation_fee || 0);
+      toast.success(
+        fee > 0
+          ? `Cancelled. Fee: $${data.cancellation_fee} — refund: $${data.refund_amount}${
+              data.refund_status === "manual" ? " (to be returned by the vendor)" : ""
+            }`
+          : "Cancelled with no fee — full refund."
+      );
+      onDone();
+      onClose();
+    } catch (e) {
+      setErr(e.message || "Could not cancel this booking");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="modal d-block" tabIndex="-1" role="dialog" style={{ background: "rgba(0,0,0,.3)" }}>
+      <div className="modal-dialog">
+        <div className="modal-content">
+          <div className="modal-header">
+            <h5 className="modal-title">Cancel booking</h5>
+            <button className="btn-close" onClick={onClose} disabled={submitting} />
+          </div>
+          <div className="modal-body">
+            <p className="text-muted small mb-3">
+              Cancellation fees depend on how close to the start date you cancel (full refund 7+
+              days out, 70% fee 1-7 days out, 100% fee under 24 hours). You'll see the exact fee
+              and refund amount once you confirm.
+            </p>
+            <label className="form-label small">Reason (optional)</label>
+            <input
+              className="form-control"
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Let us know why you're cancelling"
+            />
+            {err && <div className="text-danger small mt-2">{err}</div>}
+          </div>
+          <div className="modal-footer">
+            <button className="btn btn-light" onClick={onClose} disabled={submitting}>
+              Keep booking
+            </button>
+            <button className="btn btn-danger" onClick={submit} disabled={submitting}>
+              {submitting ? "Cancelling…" : "Confirm cancellation"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /* --- Página principal --- */
 export default function Bookings() {
   const { token, loading } = useAuth();
-  const toast = useToast();
   const [bookings, setBookings] = useState([]);
   const [programSchedules, setProgramSchedules] = useState([]);
   const [activitySchedules, setActivitySchedules] = useState([]);
@@ -124,6 +184,7 @@ export default function Bookings() {
   const [activities, setActivities] = useState([]);
   const [error, setError] = useState("");
   const [paying, setPaying] = useState(null);
+  const [cancelling, setCancelling] = useState(null);
   const [editingParticipant, setEditingParticipant] = useState(null);
   const [participant, setParticipant] = useState(null);
 
@@ -145,20 +206,6 @@ export default function Bookings() {
     } catch (err) {
       console.error(err);
       setError("Error fetching bookings");
-    }
-  };
-
-  const cancelBooking = async (b) => {
-    try {
-      const data = await api.post(`/bookings/${b.id}/cancel`);
-      toast.success(
-        data.cancellation_fee && Number(data.cancellation_fee) > 0
-          ? `Cancelado. Penalización: $${data.cancellation_fee}`
-          : "Cancelado sin penalización"
-      );
-      fetchData();
-    } catch {
-      toast.error("Error cancelando la reserva");
     }
   };
 
@@ -205,14 +252,12 @@ export default function Bookings() {
                 <th>Updated</th>
                 <th>Cancelled</th>
                 <th>Fee</th>
+                <th>Refund</th>
                 <th className="d-flex gap-2 text-nowrap">Actions</th>
               </tr>
             </thead>
             <tbody>
               {bookings.map((b) => {
-                const st = getStartTime(b, activitySchedules, programSchedules);
-                const hoursLeft = st ? (st - new Date()) / 36e5 : null;
-                const feeApplies = hoursLeft !== null && hoursLeft < 48;
                 return (
                   <tr key={b.id}>
                     <td>{resolveTitle(b)}</td>
@@ -220,7 +265,19 @@ export default function Bookings() {
                     <td>{b.attendance_status || "-"}</td>
                     <td>{b.updated_at ? new Date(b.updated_at).toLocaleString() : "-"}</td>
                     <td>{b.cancelled_at ? new Date(b.cancelled_at).toLocaleString() : "-"}</td>
-                    <td>{b.cancellation_fee ? `$${b.cancellation_fee}` : "-"}</td>
+                    <td>{b.cancellation_fee != null ? `$${b.cancellation_fee}` : "-"}</td>
+                    <td>
+                      {b.refund_status ? (
+                        <>
+                          {b.refund_amount != null && `$${b.refund_amount} `}
+                          <span className={`badge ${REFUND_BADGE[b.refund_status] || "bg-secondary"}`}>
+                            {b.refund_status}
+                          </span>
+                        </>
+                      ) : (
+                        "-"
+                      )}
+                    </td>
                     <td className="d-flex gap-2">
                       {b.status !== "cancelled" ? (
                         <>
@@ -243,10 +300,9 @@ export default function Bookings() {
                           </button>
                           <button
                             className="btn btn-sm btn-outline-danger"
-                            onClick={() => cancelBooking(b)}
-                            disabled={b.status === "cancelled"}
+                            onClick={() => setCancelling(b)}
                           >
-                            {feeApplies ? "Cancel (fee)" : "Cancel"}
+                            Cancel
                           </button>
 
                         </>
@@ -263,6 +319,9 @@ export default function Bookings() {
 
         {paying && (
           <PayModal booking={paying} onClose={() => setPaying(null)} onDone={fetchData} />
+        )}
+        {cancelling && (
+          <CancelModal booking={cancelling} onClose={() => setCancelling(null)} onDone={fetchData} />
         )}
       </main>
     </div>
