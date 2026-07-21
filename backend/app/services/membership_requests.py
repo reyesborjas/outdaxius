@@ -11,7 +11,7 @@ from app.models.team import Team, TeamMember
 from app.models.companymember import CompanyMember
 from app.models.user import User
 from app.core.permissions import check_team_or_company_admin, check_company_admin
-from app.services.team_departure import get_departure_block_reason
+from app.services.team_departure import get_departure_block_reason, remove_membership
 
 DEFAULT_EXPIRES_DAYS = 14
 
@@ -202,8 +202,7 @@ def accept(db: Session, *, request_id: UUID, actor: User) -> MembershipRequest:
         block_reason = get_departure_block_reason(db, target_user, membership=existing_membership)
         if block_reason:
             raise ValueError(f"Cannot transfer: {block_reason}")
-        db.delete(existing_membership)
-        db.flush()
+        remove_membership(db, existing_membership)
 
     db.add(TeamMember(team_id=req.team_id, user_id=target_user_id, role_level=req.offered_level))
 

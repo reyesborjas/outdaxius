@@ -5,15 +5,14 @@ not a delete -- see Table 5 in the spec:
   - level 2-4, no future confirmed leadership: free to leave
   - level 2-4, leading a future confirmed schedule: blocked until reassigned
   - level 1, team has other members: blocked until a successor is promoted to level 1
-  - level 1, team otherwise empty: allowed (spec says archive the team; there is no
-    archive/is_active column on teams yet, so the team row is left in place, orphaned)
+  - level 1, team otherwise empty: allowed, and the team is archived (is_active=False)
 """
 from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy.orm import Session
 
-from app.models.team import TeamMember
+from app.models.team import Team, TeamMember
 from app.models.activity import Activity
 from app.models.programs import Program
 from app.models.activity_schedule import ActivitySchedule
@@ -63,6 +62,24 @@ def get_departure_block_reason(
     return None
 
 
+def remove_membership(db: Session, membership: TeamMember) -> None:
+    """
+    Deletes a team_members row, archiving the team first if this was its last member --
+    shared by leave_team() below and membership_requests.accept() (which also removes an
+    existing membership when transferring someone into a different team).
+    """
+    other_members = db.query(TeamMember).filter(
+        TeamMember.team_id == membership.team_id,
+        TeamMember.id != membership.id,
+    ).count()
+    if other_members == 0:
+        team = db.query(Team).filter(Team.id == membership.team_id).first()
+        if team:
+            team.is_active = False
+    db.delete(membership)
+    db.flush()
+
+
 def leave_team(db: Session, user: User) -> None:
     membership = db.query(TeamMember).filter(TeamMember.user_id == user.id).first()
     if membership is None:
@@ -70,5 +87,4 @@ def leave_team(db: Session, user: User) -> None:
     reason = get_departure_block_reason(db, user, membership=membership)
     if reason:
         raise ValueError(reason)
-    db.delete(membership)
-    db.flush()
+    remove_membership(db, membership)

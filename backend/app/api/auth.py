@@ -55,7 +55,10 @@ class RegisterIn(BaseModel):
     display_name: str
     first_name: Optional[str] = None
     last_name: Optional[str] = None
-    role: Literal["user", "guide"] = "user"
+    # "client" matches the live user_role DB enum (admin/guide/client) -- was "user" here, which
+    # the enum has never accepted since the Phase 2 migration renamed it, so every traveler
+    # self-registration 500'd.
+    role: Literal["client", "guide"] = "client"
     # Optional guide fields
     passport_number: Optional[str] = None
     phone: Optional[str] = None

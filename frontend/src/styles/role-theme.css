@@ -40,11 +40,11 @@
 
 .role-card--admin h3{ color:var(--admin); }
 .role-card--guide h3{ color:var(--guide); }
-.role-card--user  h3{ color:var(--user);  }
+.role-card--client  h3{ color:var(--user);  }
 
 .role-card--admin .bar{ background:var(--admin); }
 .role-card--guide .bar{ background:var(--guide); }
-.role-card--user  .bar{ background:var(--user);  }
+.role-card--client  .bar{ background:var(--user);  }
 
 .role-card .cta{
   margin-top:10px;
@@ -54,7 +54,7 @@
 }
 .role-card--admin .cta{ color:var(--admin); }
 .role-card--guide .cta{ color:var(--guide); }
-.role-card--user  .cta{ color:var(--user);  }
+.role-card--client  .cta{ color:var(--user);  }
 
 /* Shell layout básico */
 .app-shell{display:flex;min-height:100vh}
@@ -70,9 +70,9 @@
 .app-shell.role-guide .role-link{color:var(--guide)}
 .app-shell.role-guide .role-underline{height:6px;border-radius:999px;background:var(--guide);margin:6px 0 16px;width:75%}
 
-.app-shell.role-user .role-heading,
-.app-shell.role-user .role-link{color:var(--user)}
-.app-shell.role-user .role-underline{height:6px;border-radius:999px;background:var(--user);margin:6px 0 16px;width:75%}
+.app-shell.role-client .role-heading,
+.app-shell.role-client .role-link{color:var(--user)}
+.app-shell.role-client .role-underline{height:6px;border-radius:999px;background:var(--user);margin:6px 0 16px;width:75%}
 
 /* Enlaces del sidebar */
 .app-sidebar .nav-link.role-link{font-weight:600}

@@ -8,9 +8,12 @@ from sqlalchemy.orm import relationship
 
 
 class UserRole(enum.Enum):
-    user = "user"
+    # Matches the live Postgres user_role enum (Phase 2 migration renamed the old
+    # "user"/"company" labels to "client"/"guide") -- this Python enum had drifted out of sync
+    # with that rename until now, so GET /roles/ and POST /roles/assign were both silently
+    # advertising/accepting two role strings ("user", "company") the database has never held.
+    client = "client"
     guide = "guide"
-    company = "company"
     admin = "admin"
 class User(Base):
     __tablename__ = "users"

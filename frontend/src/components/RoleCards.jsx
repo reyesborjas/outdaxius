@@ -10,7 +10,7 @@ export default function RoleCards() {
   const cards = [
     { key: "admin",  title: "Admins",    desc: "Control & oversight." },
     { key: "guide",  title: "Guides",    desc: "Create and host." },
-    { key: "user",   title: "Travelers", desc: "Discover & book." },
+    { key: "client", title: "Travelers", desc: "Discover & book." },
   ];
 
   return (

@@ -43,7 +43,7 @@ export default function MainLayout() {
   const bookingsLink   = `/main/${email}/bookings`;
 
   return (
-    <div className={`app-shell role-${role || "user"}`}>
+    <div className={`app-shell role-${role || "client"}`}>
       <aside className="app-sidebar d-flex flex-column p-3">
         <h1 className="text-h1 mb-1 role-heading">Outdaxius</h1>
         <div className="role-underline" />
@@ -82,7 +82,7 @@ export default function MainLayout() {
           </>
         )}
 
-        {role === "user" && (
+        {role === "client" && (
           <>
             <Link to={`/main/${email}`} className="nav-link mb-2 role-link">Home</Link>
             <Link to={activitiesLink} className="nav-link mb-2 role-link">Search Activities</Link>

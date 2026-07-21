@@ -17,7 +17,7 @@ from app.models.activity import Activity
 from app.models.programactivity import ProgramActivity
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
-from app.core.permissions import require_action, check_permission, check_permission_for_resource, get_user_team_membership
+from app.core.permissions import require_action, check_permission, check_permission_for_resource, check_can_reuse, get_user_team_membership
 
 
 router = APIRouter()
@@ -196,10 +196,25 @@ def link_activities_to_program(
     
     if missing_ids:
         raise HTTPException(
-            status_code=404, 
+            status_code=404,
             detail=f"Activities not found: {', '.join(str(id) for id in missing_ids)}"
         )
-    
+
+    # Reuse policy: attaching another team's activity to this program is the same commercial
+    # exposure as scheduling it directly (see check_can_reuse in program_schedules.py/
+    # activity_schedules.py) -- a program including a private activity effectively resells it.
+    # Skipped when the program itself is teamless (edit already restricted to admin/creator, no
+    # "home team" to enforce against) or the activity is teamless (already forced is_shared=True
+    # at creation, see app.api.activities.create_activity).
+    if program.team_id:
+        for activity in activities:
+            if activity.team_id and activity.team_id != program.team_id:
+                if not check_can_reuse(db, program.team_id, activity.team_id, activity.is_shared):
+                    raise HTTPException(
+                        status_code=403,
+                        detail=f"Activity '{activity.title}' belongs to another company and is not marked as shared."
+                    )
+
     # Crear vínculos (evitando duplicados)
     created_count = 0
     for activity_id in activity_ids:

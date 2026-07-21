@@ -1,7 +1,7 @@
 # app/models/team.py
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, ForeignKey, String, DateTime, Text, SmallInteger, CheckConstraint
+from sqlalchemy import Column, ForeignKey, String, DateTime, Text, SmallInteger, Boolean, CheckConstraint
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
 from app.db.base import Base
@@ -17,6 +17,9 @@ class Team(Base):
     updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
     description = Column(Text, nullable=True)
     company_id = Column(UUID(as_uuid=True), ForeignKey("company.id", ondelete="CASCADE"), nullable=False)
+    # Spec 1.7 departure guard: set False when a level-1 guide leaves an otherwise-empty team
+    # (app.services.team_departure.leave_team) rather than leaving it dangling with zero members.
+    is_active = Column(Boolean, nullable=False, default=True)
     
     # Relationships
     members = relationship("TeamMember", back_populates="team", cascade="all, delete-orphan")

@@ -11,8 +11,8 @@ function normalizeRole(role) {
       return "Admin";
     case "guide":
       return "Guide";
-    case "user":
-      return "User";
+    case "client":
+      return "Traveler";
     default:
       return role;
   }
@@ -254,7 +254,7 @@ export default function ManageUsers() {
                           disabled={refreshing}
                           title="Change user role"
                         >
-                          <option value="user">User</option>
+                          <option value="client">Traveler</option>
                           <option value="guide">Guide</option>
                           <option value="admin">Admin</option>
                         </select>

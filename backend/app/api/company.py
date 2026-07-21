@@ -444,6 +444,7 @@ class TeamOut(BaseModel):
     created_by: UUID
     company_id: UUID
     created_at: datetime
+    is_active: bool = True
     member_count: int = 0
 
     model_config = ConfigDict(from_attributes=True)
@@ -545,8 +546,10 @@ def list_teams(
                 detail="Not a member of this company"
             )
     
-    teams = db.query(Team).filter(Team.company_id == company_id).all()
-    
+    # Archived (is_active=False) teams -- see app.services.team_departure -- are left out of the
+    # active roster by default; nothing currently needs to browse them.
+    teams = db.query(Team).filter(Team.company_id == company_id, Team.is_active == True).all()
+
     result = []
     for team in teams:
         member_count = db.query(TeamMember).filter(TeamMember.team_id == team.id).count()

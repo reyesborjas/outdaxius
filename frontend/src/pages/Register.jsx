@@ -108,7 +108,7 @@ export default function Register() {
       display_name: form.display_name,
       first_name: form.first_name || null,
       last_name: form.last_name || null,
-      role: role === "guide" ? "guide" : "user",
+      role: role === "guide" ? "guide" : "client",
     };
 
     if (role === "guide") {
