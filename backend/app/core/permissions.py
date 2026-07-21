@@ -223,9 +223,7 @@ def check_can_be_assigned(db: Session, user_id: UUID, activity_schedule_id: UUID
     Spec 1.6: a role_level 4 (field) guide may lead/participate in a standalone activity when
     assigned, but is NEVER assigned to an activity schedule that belongs to a program.
 
-    Not currently called from any live endpoint — there is no assignment-creation API yet (the
-    `assignments` table is new as of the Phase 2 migration). Ready for whichever future phase adds
-    that endpoint.
+    Called from app.services.assignments.propose_assignment (Phase 6.1).
     """
     from app.models.activity_schedule import ActivitySchedule  # local import: avoid a cycle
 
