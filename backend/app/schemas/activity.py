@@ -34,6 +34,7 @@ class ActivityOut(BaseModel):
     creator: Optional[UserOut] = None
     leader: Optional[UserOut] = None
     guide_leader: Optional[UUID] = None
+    team_id: Optional[UUID] = None
     is_shared: bool = False
     created_at: datetime
     updated_at: datetime

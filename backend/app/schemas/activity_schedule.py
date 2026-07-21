@@ -25,6 +25,7 @@ class ActivityScheduleOut(BaseModel):
     max_participants: Optional[int]
     price: Optional[Decimal]
     status: Literal["pending", "confirmed", "canceled"]
+    selling_company_id: Optional[uuid.UUID] = None
     created_at: datetime
     updated_at: datetime
 

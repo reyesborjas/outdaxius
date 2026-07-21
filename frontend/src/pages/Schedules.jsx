@@ -1,12 +1,14 @@
 import React, { useEffect, useState } from "react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
+import AssignmentsModal from "../components/AssignmentsModal";
 
 export default function Schedules() {
-  const { token, loading } = useAuth();
+  const { token, user, loading } = useAuth();
   const [programSchedules, setProgramSchedules] = useState([]);
   const [activitySchedules, setActivitySchedules] = useState([]);
   const [error, setError] = useState("");
+  const [staffingSchedule, setStaffingSchedule] = useState(null);
 
   const deduplicateById = (arr) => {
     const seen = new Set();
@@ -59,6 +61,8 @@ export default function Schedules() {
             price: a.price ?? "-",
             updated_at: a.updated_at,
             status: a.status ?? "pending",
+            team_id: activity?.team_id ?? null,
+            selling_company_id: a.selling_company_id ?? null,
           };
         });
 
@@ -140,12 +144,13 @@ export default function Schedules() {
                 <th>Price</th>
                 <th>Updated</th>
                 <th>Status</th>
+                {user?.role !== "client" && <th>Staffing</th>}
               </tr>
             </thead>
             <tbody>
               {activitySchedules.length === 0 ? (
                 <tr>
-                  <td colSpan={9} className="text-center">No activity schedules found</td>
+                  <td colSpan={user?.role !== "client" ? 10 : 9} className="text-center">No activity schedules found</td>
                 </tr>
               ) : (
                 activitySchedules.map((a) => (
@@ -159,6 +164,17 @@ export default function Schedules() {
                     <td>{a.price ? `$${a.price}` : "-"}</td>
                     <td>{a.updated_at ? new Date(a.updated_at).toLocaleString() : "-"}</td>
                     <td>{a.status}</td>
+                    {user?.role !== "client" && (
+                      <td>
+                        {a.team_id && a.selling_company_id ? (
+                          <button className="btn btn-sm btn-outline-primary" onClick={() => setStaffingSchedule(a)}>
+                            Staff
+                          </button>
+                        ) : (
+                          <span className="text-muted small">-</span>
+                        )}
+                      </td>
+                    )}
                   </tr>
                 ))
               )}
@@ -166,6 +182,10 @@ export default function Schedules() {
           </table>
         </div>
       </main>
+
+      {staffingSchedule && (
+        <AssignmentsModal schedule={staffingSchedule} onClose={() => setStaffingSchedule(null)} />
+      )}
     </div>
   );
 }
