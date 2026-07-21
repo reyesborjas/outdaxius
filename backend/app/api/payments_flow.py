@@ -24,7 +24,7 @@ from app.models.program_schedule import ProgramSchedule
 from app.models.company_payment_account import CompanyPaymentAccount
 from app.models.companymember import CompanyMember
 from app.services.payments.base import get_provider
-from app.services.cancellation import calculate_cancellation_fee
+from app.services.cancellation import apply_cancellation
 
 router = APIRouter(tags=["payments-flow"])
 
@@ -181,8 +181,14 @@ def refund_booking(
     booking = db.query(Booking).filter(Booking.id == booking_id).first()
     if not booking:
         raise HTTPException(404, detail="Booking not found")
-    if booking.user_id != current.id and current.role != "admin":
+    is_admin = current.role == "admin"
+    if booking.user_id != current.id and not is_admin:
         raise HTTPException(403, detail="Not allowed")
+
+    # Only an admin may declare a non-client party -- otherwise a client cancelling their own
+    # booking could claim cancelled_by_party="vendor" to dodge the client fee tiers entirely
+    # (vendor cancellations are always a full refund per spec 1.9).
+    cancelled_by_party = payload.cancelled_by_party if is_admin else "client"
 
     payment = db.query(Payment).filter(
         Payment.booking_id == booking_id, Payment.provider == "flow", Payment.status == "succeeded"
@@ -202,33 +208,21 @@ def refund_booking(
     elif booking.program_schedule_id:
         schedule = db.query(ProgramSchedule).filter(ProgramSchedule.id == booking.program_schedule_id).first()
 
-    hours_before_start = 999999.0
-    if schedule and schedule.start_time:
-        now = datetime.now(schedule.start_time.tzinfo or timezone.utc)
-        hours_before_start = (schedule.start_time - now).total_seconds() / 3600
-
-    fee = calculate_cancellation_fee(
-        cancelled_by_party=payload.cancelled_by_party,
-        hours_before_start=hours_before_start,
+    refund_amount = apply_cancellation(
+        booking=booking,
+        cancelled_by=current,
+        cancelled_by_party=cancelled_by_party,
+        reason=payload.reason,
         amount_paid=payment.amount,
-        policy_snapshot=booking.policy_snapshot or None,
+        schedule_start=schedule.start_time if schedule else None,
     )
-    refund_amount = payment.amount - fee
 
     result = provider.refund(payment.provider_ref, refund_amount)
-
-    booking.status = "cancelled"
-    booking.cancelled_at = datetime.now(timezone.utc)
-    booking.cancelled_by = current.id
-    booking.cancelled_by_party = payload.cancelled_by_party
-    booking.cancellation_reason = payload.reason
-    booking.cancellation_fee = fee
-    booking.refund_amount = refund_amount
 
     if result.success:
         booking.refund_status = "succeeded"
         booking.refund_reference = result.provider_refund_ref
-        payment.status = "refunded" if fee == 0 else "partially_refunded"
+        payment.status = "refunded" if booking.cancellation_fee == 0 else "partially_refunded"
     else:
         # Spec: insufficient vendor balance (or any provider failure) is routine, not an error --
         # queue it for manual resolution rather than surfacing a 500 to the client.
@@ -239,7 +233,7 @@ def refund_booking(
         "status": "ok",
         "refund_status": booking.refund_status,
         "refund_amount": str(refund_amount),
-        "fee": str(fee),
+        "fee": str(booking.cancellation_fee),
     }
 
 
@@ -251,6 +245,16 @@ class ManualQueueItem(BaseModel):
     cancellation_reason: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
+
+
+def _to_manual_queue_item(b: Booking) -> ManualQueueItem:
+    return ManualQueueItem(
+        booking_id=b.id,
+        user_id=b.user_id,
+        cancelled_at=b.cancelled_at,
+        refund_amount=b.refund_amount,
+        cancellation_reason=b.cancellation_reason,
+    )
 
 
 @router.get("/admin/refunds/manual-queue", response_model=List[ManualQueueItem])
@@ -272,9 +276,9 @@ def list_manual_refund_queue(
         if not admin_company_ids:
             raise HTTPException(403, detail="Not a company admin")
         bookings = [b for b in query.all() if _resolve_selling_company_id(db, b) in admin_company_ids]
-        return bookings
+        return [_to_manual_queue_item(b) for b in bookings]
 
-    return query.all()
+    return [_to_manual_queue_item(b) for b in query.all()]
 
 
 class ResolveRefundRequest(BaseModel):

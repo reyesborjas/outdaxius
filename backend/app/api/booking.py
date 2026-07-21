@@ -1,4 +1,5 @@
 # app/api/booking.py
+from decimal import Decimal
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from sqlalchemy import func
@@ -8,14 +9,14 @@ from app.db.session import get_db
 from app.api.deps import get_current_user
 from app.models.user import User
 from app.models.booking import Booking
-from app.schemas.booking import BookingCreate, BookingOut
+from app.schemas.booking import BookingCreate, BookingOut, BookingCancelRequest
 from app.models.activity_schedule import ActivitySchedule
 from app.models.program_schedule import ProgramSchedule
 from app.models.payment import Payment
 from app.schemas.payment import PaymentCreate, PaymentOut
 from app.services.company_usage import companies_for_program_schedule, companies_for_activity_schedule
 from app.services.enforce_limits import enforce_company_monthly_booking_limits
-from app.services.cancellation import build_policy_snapshot
+from app.services.cancellation import build_policy_snapshot, apply_cancellation
 router = APIRouter()
 
 @router.get("/", response_model=List[BookingOut])
@@ -171,6 +172,7 @@ def confirm_payment(booking_id: uuid.UUID,
 
 @router.post("/{booking_id}/cancel", response_model=BookingOut)
 def cancel_booking(booking_id: uuid.UUID,
+                   payload: BookingCancelRequest = BookingCancelRequest(),
                    db: Session = Depends(get_db),
                    current: User = Depends(get_current_user)):
     b = db.query(Booking).filter(Booking.id == booking_id, Booking.user_id == current.id).first()
@@ -180,8 +182,37 @@ def cancel_booking(booking_id: uuid.UUID,
     if b.status == "cancelled":
         return b  # idempotente
 
-    # Regla MVP: se puede cancelar siempre. En producción: ventana temporal y política de fee.
-    b.status = "cancelled"
+    schedule = None
+    if b.activity_schedule_id:
+        schedule = db.query(ActivitySchedule).filter(ActivitySchedule.id == b.activity_schedule_id).first()
+    elif b.program_schedule_id:
+        schedule = db.query(ProgramSchedule).filter(ProgramSchedule.id == b.program_schedule_id).first()
+
+    # This endpoint only ever cancels the caller's own booking (query above is scoped to
+    # Booking.user_id == current.id), so the cancelling party is always the client -- never
+    # caller-supplied, unlike payments_flow.refund_booking's admin-only override.
+    payment = (
+        db.query(Payment)
+        .filter(Payment.booking_id == booking_id)
+        .order_by(Payment.created_at.desc())
+        .first()
+    )
+    amount_paid = payment.amount if payment else Decimal("0")
+
+    refund_amount = apply_cancellation(
+        booking=b,
+        cancelled_by=current,
+        cancelled_by_party="client",
+        reason=payload.reason,
+        amount_paid=amount_paid,
+        schedule_start=schedule.start_time if schedule else None,
+    )
+
+    # No payment gateway to call for the manual voucher path -- any amount owed back has to be
+    # returned by the vendor outside the platform, tracked the same way a Flow provider failure
+    # is (app.api.payments_flow's manual refund queue), so it surfaces on the same admin screen.
+    b.refund_status = "manual" if refund_amount > 0 else "not_required"
+
     db.add(b)
     db.commit()
     db.refresh(b)

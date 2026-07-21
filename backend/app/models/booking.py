@@ -28,7 +28,10 @@ class Booking(Base):
     updated_at = Column(DateTime, server_default=func.now(), onupdate=func.now())
 
     cancelled_at = Column(DateTime, nullable=True)
-    cancellation_fee = Column(Integer, nullable=True)
+    # DB column is numeric(12,2), matching refund_amount below -- was declared Integer here, which
+    # silently truncates cents on write (SQLAlchemy's Integer bind processor calls int() on the
+    # Decimal fee before sending it).
+    cancellation_fee = Column(Numeric(12, 2), nullable=True)
 
     # Added by the Phase 2 migration but not previously mapped on the ORM -- Phase 4 is the first
     # phase that actually reads/writes them.
