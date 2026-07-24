@@ -62,6 +62,7 @@ def list_activities(db: Session = Depends(get_db)):
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
+            selectinload(Activity.team),
         )
         .all()
     )
@@ -85,6 +86,7 @@ def search_activities(q: str, db: Session = Depends(get_db)):
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
+            selectinload(Activity.team),
         )
         .join(Types, Activity.activity_type == Types.id)
         .filter(
@@ -115,6 +117,7 @@ def get_activity(activity_id: uuid.UUID, db: Session = Depends(get_db)):
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
+            selectinload(Activity.team),
         )
         .filter(Activity.id == activity_id)
         .first()
@@ -192,6 +195,7 @@ def create_activity(
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
+            selectinload(Activity.team),
         )
         .filter(Activity.id == act.id)
         .first()
@@ -247,6 +251,7 @@ def update_activity(
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
+            selectinload(Activity.team),
         )
         .filter(Activity.id == activity_id)
         .first()

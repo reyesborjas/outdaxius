@@ -35,6 +35,7 @@ import AcceptInvitation from "./pages/AcceptInvitation";
 import RefundQueue from "./pages/RefundQueue";
 import MembershipRequests from "./pages/MembershipRequests";
 import Assignments from "./pages/Assignments";
+import CompanyProfile from "./pages/CompanyProfile";
 
 export default function App() {
   return (
@@ -46,6 +47,7 @@ export default function App() {
       <Route path="/activities" element={<PublicLayout><Activities /></PublicLayout>} />
       <Route path="/programs" element={<PublicLayout><Programs /></PublicLayout>} />
       <Route path="/about" element={<PublicLayout><About /></PublicLayout>} />
+      <Route path="/companies/:companyId" element={<PublicLayout><CompanyProfile /></PublicLayout>} />
        <Route path="/accept-invitation" element={<AcceptInvitation />} />
       {/* Dashboard (MainLayout, /main/:email) — gated behind auth */}
       <Route element={<ProtectedRoute />}>

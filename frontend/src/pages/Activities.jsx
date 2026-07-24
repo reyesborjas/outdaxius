@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import EditActivityModal from "./EditActivityModal";
 import ViewActivityModal from "./ViewActivityModal";
 import SearchBar from "../components/SearchBar";
+import CancellationRateBadge from "../components/CancellationRateBadge";
 import { api } from "../lib/api";
 
 function normalizeGallery(g) {
@@ -239,8 +240,9 @@ const runSearch = async ({ query }) => {
                       {scheduleCounts[a.id]} upcoming schedule{scheduleCounts[a.id] === 1 ? "" : "s"}
                     </span>
                   )}
-                  <div className="small text-muted mt-2 border-top pt-2">
-                    By {a.creator?.display_name || a.creator?.email || "Unknown"}
+                  <div className="small text-muted mt-2 border-top pt-2 d-flex justify-content-between align-items-center gap-2">
+                    <span>By {a.creator?.display_name || a.creator?.email || "Unknown"}</span>
+                    <CancellationRateBadge companyId={a.company_id} />
                   </div>
                 </div>
               </div>

@@ -6,6 +6,7 @@ import ViewActivityModal from "../pages/ViewActivityModal";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api, ApiError } from "../lib/api";
+import CancellationRateBadge from "../components/CancellationRateBadge";
 
 function normalizeGallery(g) {
   if (!Array.isArray(g)) return [];
@@ -474,8 +475,9 @@ export default function ViewProgramModal({ program, onClose }) {
           </div>
 
           <div className="modal-footer d-flex justify-content-between align-items-center">
-            <span className="small text-muted">
+            <span className="small text-muted d-flex align-items-center gap-2">
               By {program?.creator?.display_name || program?.creator?.email || "Unknown"}
+              <CancellationRateBadge companyId={program?.company_id} />
             </span>
             <button onClick={onClose} className="btn btn-secondary">
               Close

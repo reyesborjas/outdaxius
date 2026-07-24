@@ -9,9 +9,10 @@ from app.models.company import Company
 from app.models.companymember import CompanyMember
 from app.models.user import User
 from app.schemas.company import (
-    CompanyCreate, CompanyOut, CompanyUpdate, 
-    CompanyWithMembers, LicenseInfo
+    CompanyCreate, CompanyOut, CompanyUpdate,
+    CompanyWithMembers, LicenseInfo, PublicCompanyOut, CancellationRateOut
 )
+from app.services.vendor_reputation import get_vendor_cancellation_rate
 from app.schemas.companymember import CompanyMemberOut
 from app.schemas.invitation import (
     InvitationCreate, InvitationOut, InvitationAccept, InvitationListOut
@@ -120,8 +121,37 @@ def get_company(
     result = CompanyWithMembers.from_orm(db_company)
     result.current_guides_count = license_info['current_guides']
     result.can_add_guides = license_info['can_add_guides']
-    
+
     return result
+
+@router.get("/{company_id}/cancellation-rate", response_model=CancellationRateOut)
+def get_company_cancellation_rate(company_id: UUID, db: Session = Depends(get_db)):
+    """Public, no auth -- a traveler deciding whether to book needs to see this before creating
+    an account. See app.services.vendor_reputation for the vendor-only/90-day-window definition."""
+    db_company = db.query(Company).filter(Company.id == company_id).first()
+    if not db_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    return CancellationRateOut(**get_vendor_cancellation_rate(db, company_id))
+
+@router.get("/{company_id}/public", response_model=PublicCompanyOut)
+def get_company_public(company_id: UUID, db: Session = Depends(get_db)):
+    """Public storefront -- deliberately a different, narrower schema than get_company/
+    CompanyWithMembers, which requires membership and exposes legal/contact fields no traveler
+    should see."""
+    db_company = db.query(Company).filter(
+        Company.id == company_id, Company.is_active == True  # noqa: E712
+    ).first()
+    if not db_company:
+        raise HTTPException(status_code=404, detail="Company not found")
+    rate = get_vendor_cancellation_rate(db, company_id)
+    return PublicCompanyOut(
+        id=db_company.id,
+        name=db_company.name,
+        description=db_company.description,
+        trade_name=db_company.trade_name,
+        country=db_company.country,
+        cancellation=CancellationRateOut(**rate),
+    )
 
 @router.get("", response_model=List[CompanyOut])
 def list_companies(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):

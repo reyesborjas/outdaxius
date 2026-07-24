@@ -5,6 +5,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import EditProgramModal from "./EditProgramModal";
 import ViewProgramModal from "./ViewProgramModal";
 import SearchBar from "../components/SearchBar";
+import CancellationRateBadge from "../components/CancellationRateBadge";
 import { api } from "../lib/api";
 
 // normaliza y ordena galería por position
@@ -231,8 +232,9 @@ export default function Programs() {
                       {scheduleCounts[p.id]} upcoming schedule{scheduleCounts[p.id] === 1 ? "" : "s"}
                     </span>
                   )}
-                  <div className="small text-muted mt-2 border-top pt-2">
-                    By {p.creator?.display_name || p.creator?.email || "Unknown"}
+                  <div className="small text-muted mt-2 border-top pt-2 d-flex justify-content-between align-items-center gap-2">
+                    <span>By {p.creator?.display_name || p.creator?.email || "Unknown"}</span>
+                    <CancellationRateBadge companyId={p.company_id} />
                   </div>
                 </div>
               </div>

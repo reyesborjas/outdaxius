@@ -41,7 +41,8 @@ def list_programs(db: Session = Depends(get_db)):
         db.query(Program)
         .options(
             selectinload(Program.creator),
-            selectinload(Program.type)  # cargar el type vinculado
+            selectinload(Program.type),  # cargar el type vinculado
+            selectinload(Program.team),
         )
         .all()
     )

@@ -16,6 +16,8 @@ class ProgramOut(BaseModel):
     type: TypesOut
     is_shared: bool = False
     creator: Optional[UserOut] = None
+    team_id: Optional[UUID] = None
+    company_id: Optional[UUID] = None
 
     class Config:
         from_attributes = True

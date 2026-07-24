@@ -26,6 +26,11 @@ class Program(Base):
     # Reuse policy: same team or same company may always schedule this; a different company may
     # only do so when this is true (app.core.permissions.check_can_reuse).
     is_shared = Column(Boolean, nullable=False, default=False)
+    team = relationship("Team")
+
+    @property
+    def company_id(self):
+        return self.team.company_id if self.team else None
 
     # Relationships
     type = relationship("Types", foreign_keys=[program_type])

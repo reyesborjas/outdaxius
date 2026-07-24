@@ -76,3 +76,22 @@ class LicenseInfo(BaseModel):
     current_guides: int
     can_add_guides: bool
     expires_at: Optional[datetime] = None
+
+class CancellationRateOut(BaseModel):
+    cancellation_rate: Optional[float] = None
+    vendor_cancellations: int
+    total_bookings: int
+    window_days: int
+    sufficient_data: bool
+
+class PublicCompanyOut(BaseModel):
+    """The public storefront view -- deliberately excludes legal/contact fields (address,
+    legal_representive*, tax info) that CompanyOut exposes to authenticated members."""
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    trade_name: Optional[str] = None
+    country: Optional[str] = None
+    cancellation: CancellationRateOut
+
+    model_config = ConfigDict(from_attributes=True)
