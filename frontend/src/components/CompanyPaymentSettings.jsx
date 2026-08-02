@@ -13,6 +13,8 @@ const PROVIDER_CREDENTIAL_FIELDS = {
     { key: "api_key", label: "API Key" },
   ],
   mercadopago: [{ key: "access_token", label: "Access Token" }],
+  // No credentials at all -- app.services.payments.demo.DemoProvider never leaves the app.
+  demo: [],
 };
 
 export default function CompanyPaymentSettings({ companyId, token }) {
@@ -21,7 +23,7 @@ export default function CompanyPaymentSettings({ companyId, token }) {
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const [provider, setProvider] = useState("flow");
+  const [provider, setProvider] = useState("demo");
   const [isSandbox, setIsSandbox] = useState(true);
   const [currency, setCurrency] = useState("CLP");
   const [credentialValues, setCredentialValues] = useState({});
@@ -52,7 +54,7 @@ export default function CompanyPaymentSettings({ companyId, token }) {
     try {
       await api.post(`/companies/${companyId}/payment-accounts`, {
         provider,
-        is_sandbox: isSandbox,
+        is_sandbox: provider === "demo" ? true : isSandbox,
         currency,
         credentials: credentialValues,
       });
@@ -149,6 +151,7 @@ export default function CompanyPaymentSettings({ companyId, token }) {
                 value={provider}
                 onChange={(e) => { setProvider(e.target.value); setCredentialValues({}); }}
               >
+                <option value="demo">Demo (instant, no signup)</option>
                 <option value="flow">Flow</option>
                 <option value="stripe">Stripe</option>
                 <option value="transbank">Transbank</option>
@@ -164,18 +167,30 @@ export default function CompanyPaymentSettings({ companyId, token }) {
                 onChange={(e) => setCurrency(e.target.value.toUpperCase())}
               />
             </div>
-            <div className="col-md-4 d-flex align-items-end">
-              <div className="form-check">
-                <input
-                  className="form-check-input"
-                  type="checkbox"
-                  id="isSandbox"
-                  checked={isSandbox}
-                  onChange={(e) => setIsSandbox(e.target.checked)}
-                />
-                <label className="form-check-label" htmlFor="isSandbox">Sandbox mode</label>
+            {provider !== "demo" && (
+              <div className="col-md-4 d-flex align-items-end">
+                <div className="form-check">
+                  <input
+                    className="form-check-input"
+                    type="checkbox"
+                    id="isSandbox"
+                    checked={isSandbox}
+                    onChange={(e) => setIsSandbox(e.target.checked)}
+                  />
+                  <label className="form-check-label" htmlFor="isSandbox">Sandbox mode</label>
+                </div>
               </div>
-            </div>
+            )}
+
+            {provider === "demo" && (
+              <div className="col-12">
+                <p className="text-muted small mb-0">
+                  Simulates real payments end-to-end (pay, confirm, refund) with no external
+                  account and no credentials — useful for demoing the platform to a prospective
+                  client before setting up a real provider.
+                </p>
+              </div>
+            )}
 
             {fields.map((f) => (
               <div className="col-md-6" key={f.key}>

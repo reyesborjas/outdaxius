@@ -67,14 +67,17 @@ def get_provider(company_payment_account) -> PaymentProvider:
     Import is local to avoid a base.py <-> flow.py import cycle at module load time."""
     from app.core.crypto import decrypt_credentials
     from app.services.payments.flow import FlowProvider
+    from app.services.payments.demo import DemoProvider
 
     credentials = decrypt_credentials(company_payment_account.credentials_encrypted)
 
     if company_payment_account.provider == "flow":
         return FlowProvider(credentials, is_sandbox=company_payment_account.is_sandbox)
+    if company_payment_account.provider == "demo":
+        return DemoProvider(credentials, is_sandbox=company_payment_account.is_sandbox)
 
     raise NotImplementedError(
         f"No provider implementation for '{company_payment_account.provider}' yet -- "
-        "only 'flow' is implemented. Stripe/Transbank/Mercadopago are declared in the "
-        "company_payment_accounts CHECK constraint for future providers, not implemented here."
+        "only 'flow' and 'demo' are implemented. Stripe/Transbank/Mercadopago are declared in "
+        "the company_payment_accounts CHECK constraint for future providers, not implemented here."
     )

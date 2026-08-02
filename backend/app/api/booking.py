@@ -17,6 +17,8 @@ from app.schemas.payment import PaymentCreate, PaymentOut
 from app.services.company_usage import companies_for_program_schedule, companies_for_activity_schedule
 from app.services.enforce_limits import enforce_company_monthly_booking_limits
 from app.services.cancellation import build_policy_snapshot, apply_cancellation
+from app.services.payment_accounts import resolve_selling_company_id, get_payment_account
+from app.services.payments.base import get_provider
 router = APIRouter()
 
 @router.get("/", response_model=List[BookingOut])
@@ -208,10 +210,29 @@ def cancel_booking(booking_id: uuid.UUID,
         schedule_start=schedule.start_time if schedule else None,
     )
 
-    # No payment gateway to call for the manual voucher path -- any amount owed back has to be
-    # returned by the vendor outside the platform, tracked the same way a Flow provider failure
-    # is (app.api.payments_flow's manual refund queue), so it surfaces on the same admin screen.
-    b.refund_status = "manual" if refund_amount > 0 else "not_required"
+    # If this booking was paid through an automated provider (Flow/demo, not the manual voucher
+    # path), attempt an automated refund the same way payments_flow.refund_booking does -- a
+    # traveler cancelling a demo- or Flow-paid booking should see an instant refund, not "pending
+    # admin action". Falls through to the manual queue if there's no such payment, or the
+    # provider itself reports failure (e.g. insufficient vendor balance).
+    auto_refunded = False
+    if payment and payment.status == "succeeded" and payment.provider:
+        selling_company_id = resolve_selling_company_id(db, b)
+        account = get_payment_account(db, selling_company_id, payment.provider) if selling_company_id else None
+        if account:
+            result = get_provider(account).refund(payment.provider_ref, refund_amount)
+            if result.success:
+                b.refund_status = "succeeded"
+                b.refund_reference = result.provider_refund_ref
+                payment.status = "refunded" if b.cancellation_fee == 0 else "partially_refunded"
+                auto_refunded = True
+
+    if not auto_refunded:
+        # No payment gateway to call for the manual voucher path -- any amount owed back has to
+        # be returned by the vendor outside the platform, tracked the same way a Flow/demo
+        # provider failure is (app.api.payments_flow's manual refund queue), so it surfaces on
+        # the same admin screen.
+        b.refund_status = "manual" if refund_amount > 0 else "not_required"
 
     db.add(b)
     db.commit()

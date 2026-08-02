@@ -36,6 +36,7 @@ import RefundQueue from "./pages/RefundQueue";
 import MembershipRequests from "./pages/MembershipRequests";
 import Assignments from "./pages/Assignments";
 import CompanyProfile from "./pages/CompanyProfile";
+import DemoCheckout from "./pages/DemoCheckout";
 
 export default function App() {
   return (
@@ -51,6 +52,7 @@ export default function App() {
        <Route path="/accept-invitation" element={<AcceptInvitation />} />
       {/* Dashboard (MainLayout, /main/:email) — gated behind auth */}
       <Route element={<ProtectedRoute />}>
+        <Route path="/demo-checkout/:providerRef" element={<PublicLayout><DemoCheckout /></PublicLayout>} />
         <Route path="/main/:email" element={<MainLayout />}>
         <Route path="profile" element={<ProfileEditor />} />
           {/* User */}

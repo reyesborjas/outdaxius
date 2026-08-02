@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { useToast } from "../context/ToastContext";
 import { api } from "../lib/api";
@@ -177,7 +178,10 @@ function CancelModal({ booking, onClose, onDone }) {
 /* --- Página principal --- */
 export default function Bookings() {
   const { token, loading } = useAuth();
+  const navigate = useNavigate();
+  const toast = useToast();
   const [bookings, setBookings] = useState([]);
+  const [payingNow, setPayingNow] = useState(null);
   const [programSchedules, setProgramSchedules] = useState([]);
   const [activitySchedules, setActivitySchedules] = useState([]);
   const [programs, setPrograms] = useState([]);
@@ -206,6 +210,21 @@ export default function Bookings() {
     } catch (err) {
       console.error(err);
       setError("Error fetching bookings");
+    }
+  };
+
+  const payNow = async (booking) => {
+    setPayingNow(booking.id);
+    try {
+      const data = await api.post(`/bookings/${booking.id}/pay`);
+      if (/^https?:\/\//i.test(data.redirect_url)) {
+        window.location.href = data.redirect_url;
+      } else {
+        navigate(data.redirect_url);
+      }
+    } catch (e) {
+      toast.error(e.message || "Could not start payment");
+      setPayingNow(null);
     }
   };
 
@@ -296,8 +315,17 @@ export default function Bookings() {
                                     }
 
                           <button className="btn btn-sm btn-outline-primary" onClick={() => setPaying(b)}>
-                            Pay
+                            Pay (voucher)
                           </button>
+                          {b.status === "pending" && (
+                            <button
+                              className="btn btn-sm btn-primary"
+                              disabled={payingNow === b.id}
+                              onClick={() => payNow(b)}
+                            >
+                              {payingNow === b.id ? "Starting…" : "Pay Now"}
+                            </button>
+                          )}
                           <button
                             className="btn btn-sm btn-outline-danger"
                             onClick={() => setCancelling(b)}

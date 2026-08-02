@@ -24,7 +24,7 @@ router = APIRouter(prefix="/companies", tags=["company-payments"])
 
 
 class CompanyPaymentAccountCreate(BaseModel):
-    provider: Literal["flow", "stripe", "transbank", "mercadopago"]
+    provider: Literal["flow", "stripe", "transbank", "mercadopago", "demo"]
     is_sandbox: bool = True
     currency: str = Field(default="CLP", min_length=3, max_length=3)
     external_account_id: Optional[str] = None
