@@ -49,7 +49,32 @@ Verified gaps that block a demo:
 
 ---
 
-## Phase 1 — Demo data foundation (≈16 h) — CRITICAL PATH
+## Phase 1 — Demo data foundation — ✅ DONE
+
+Delivered. See [DEMO_SETUP.md](./DEMO_SETUP.md) for the full setup path, demo logins, and the
+issues this phase uncovered.
+
+| Script | Purpose |
+| --- | --- |
+| `backend/scripts/bootstrap_schema.py` | Brings an empty database to Alembic head. Needed because `alembic upgrade head` alone does not work on a fresh database and `schema.sql` is not directly runnable. |
+| `backend/scripts/demo_data.py` | The narrative — tenants, people, places, catalogue. Separated so a salesperson can tune content without touching mechanics. |
+| `backend/scripts/seed_demo.py` | The seeder. Deterministic, idempotent, scoped, guarded. |
+| `backend/scripts/verify_demo.py` | 27 checks asserting the demo is showable. Exits non-zero if not. |
+
+Verified against a running server: all five logins authenticate, the customer/activities/programs/
+bookings endpoints return populated data, and the full book → pay → confirm → cancel → refund
+cycle completes through the demo provider.
+
+**Two findings block later phases** — details in DEMO_SETUP.md:
+
+1. **Plan limits are only half-enforced.** `activities.py` imports `enforce_company_creation_limits`
+   without calling it; `activity_schedules.py` never imports it. A `basic` tenant walked from 48 to
+   52 schedules against a cap of 50 with no error. **Phase 5's upgrade-path moment cannot be
+   demoed until both call sites are wired.**
+2. **The test suite does not run** — no `tests/conftest.py`, all 8 tests error at setup. Phase 6.
+
+<details>
+<summary>Original Phase 1 plan (≈16 h)</summary>
 
 An empty database is the number one reason technical demos fail. Everything else is decoration.
 
@@ -123,6 +148,21 @@ code changes. Verify the redirect lands on `/demo-checkout/{ref}` and that
 **Acceptance:** drop the DB, run `alembic upgrade head && python -m scripts.seed_demo --reset`,
 log in as all four users, and every single page has content. No empty state, no spinner that
 never resolves, no `[]`.
+
+</details>
+
+**What changed against the plan.** Three things the plan did not anticipate:
+
+- The bootstrap step (`bootstrap_schema.py`) had to be written first — `alembic upgrade head`
+  does not work on an empty database, so the acceptance criterion above was not runnable as
+  stated.
+- A **fifth** demo login was needed. `GET /companies` only returns companies the caller belongs
+  to, so `owner@andes.demo` cannot see the freemium tenant at all. Phase 5's plan-limit demo
+  needs `owner@patagonia.demo`.
+- The freemium tenant is parked near the **schedules** cap rather than the activities cap.
+  Schedules carry no hand-written content, so reaching 48 of 50 needs no invented activity names
+  — whereas padding to 19 of 20 activities would have meant fabricating filler that a prospect
+  would notice immediately.
 
 ---
 
