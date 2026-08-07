@@ -13,7 +13,7 @@ from app.models.programactivity import ProgramActivity
 from app.models.activity import Activity
 from app.models.team import Team
 from app.core.permissions import require_action, check_can_reuse, get_user_team_membership
-from app.services.enforce_limits import enforce_charges_enabled
+from app.services.enforce_limits import enforce_charges_enabled, enforce_company_creation_limits
 
 router = APIRouter()
 
@@ -76,6 +76,12 @@ def create_activity_schedule(
             team = db.query(Team).filter(Team.id == activity.team_id).first()
             if team:
                 selling_company_id = team.company_id
+                # Gated against the SELLING company, not the caller's company context (which is
+                # what program_schedules.py uses). company_usage counts an activity_schedule
+                # toward the company that owns the underlying activity, so that is the company
+                # whose quota this row consumes -- and gating on the caller instead would let a
+                # guest company schedule a shared activity straight through the owner's cap.
+                enforce_company_creation_limits(db, selling_company_id, metric="schedules_total")
                 enforce_charges_enabled(db, selling_company_id)
 
         sched = ActivitySchedule(**payload.model_dump(), selling_company_id=selling_company_id)
@@ -101,6 +107,21 @@ def create_activity_schedule(
 
     # Inherits the parent program schedule's selling company -- already gated on charges_enabled
     # when the parent was created.
+    #
+    # The quota check is NOT inherited, though: company_usage.schedules_total counts rows in both
+    # program_schedules and activity_schedules, so every child added here consumes quota of its
+    # own. Skipping the check on this path would leave the cap trivially bypassable -- create one
+    # program schedule, then attach children forever -- and would let GET /limits report usage
+    # above a cap the system never enforces.
+    #
+    # The cost is that filling a program schedule can stop partway once the cap is reached,
+    # leaving a parent with some of its activities. That is a real rough edge, but the parent and
+    # each child are already separate requests, so a partial build is an existing failure mode
+    # rather than one introduced here; and a 402 naming the count is a better outcome than a
+    # limit that silently means nothing.
+    if parent.selling_company_id:
+        enforce_company_creation_limits(db, parent.selling_company_id, metric="schedules_total")
+
     sched = ActivitySchedule(**payload.model_dump(), selling_company_id=parent.selling_company_id)
     db.add(sched)
     db.commit()

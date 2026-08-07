@@ -65,13 +65,16 @@ Verified against a running server: all five logins authenticate, the customer/ac
 bookings endpoints return populated data, and the full book → pay → confirm → cancel → refund
 cycle completes through the demo provider.
 
-**Two findings block later phases** — details in DEMO_SETUP.md:
+**Findings** — details in DEMO_SETUP.md:
 
-1. **Plan limits are only half-enforced.** `activities.py` imports `enforce_company_creation_limits`
-   without calling it; `activity_schedules.py` never imports it. A `basic` tenant walked from 48 to
-   52 schedules against a cap of 50 with no error. **Phase 5's upgrade-path moment cannot be
-   demoed until both call sites are wired.**
-2. **The test suite does not run** — no `tests/conftest.py`, all 8 tests error at setup. Phase 6.
+1. ~~**Plan limits are only half-enforced.**~~ **Fixed.** `activities.py` imported
+   `enforce_company_creation_limits` without calling it; `activity_schedules.py` never imported
+   it. A `basic` tenant walked from 48 to 52 schedules against a cap of 50 with no error. Three
+   call sites are now wired and verified against a running server — activities block at 20/20,
+   standalone and child schedules at 50/50, unlimited tiers unaffected.
+   `tests/test_plan_limit_wiring.py` guards the regression. **Phase 5 is unblocked.**
+2. **The test suite does not run** — no `tests/conftest.py`, all 8 tests in `test_companies.py`
+   error at setup. Phase 6. (The new wiring test needs no fixtures and does run.)
 
 <details>
 <summary>Original Phase 1 plan (≈16 h)</summary>
@@ -300,6 +303,12 @@ Then make the limits *visible*, because a limit a customer cannot see cannot mot
 Seed **Patagonia Kayak Co.** deliberately close to its `basic` limits so you can log in during
 the call, try to add one more activity, and let the prospect watch the upgrade path fire live.
 That moment sells the freemium model far better than a slide does.
+
+**Ready to demo now.** Phase 1 seeds Patagonia at 48 of 50 schedules and the enforcement gap is
+fixed, so the sequence works today: log in as `owner@patagonia.demo`, add two departures, and the
+third returns `402 Plan limit reached for schedules_total: 50/50`. What remains in this phase is
+presentation — turning that raw 402 into a friendly upgrade prompt, and surfacing the usage meters
+that `GET /companies/{id}/limits` already returns.
 
 ---
 

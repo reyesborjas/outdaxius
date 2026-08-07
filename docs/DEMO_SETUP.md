@@ -147,24 +147,51 @@ python -m scripts.bootstrap_schema --drop   # rebuild the schema from scratch
 
 Documented rather than silently fixed, because each is a product decision rather than seeder work.
 
-1. **Plan limits are only half-enforced.** `app/api/programs.py` and
-   `app/api/program_schedules.py` call `enforce_company_creation_limits`, but
-   `app/api/activities.py` imports it and never calls it, and `app/api/activity_schedules.py`
-   never imports it at all. So `max_activities` is not enforced, and `max_schedules_total` is
-   only enforced when the schedule happens to be a *program* schedule — creating activity
-   schedules sails past the cap. Verified against a running server: a `basic` tenant went from
-   48 to 52 schedules with no error.
-
-   **This blocks the Phase 5 demo moment.** Wiring both call sites is a prerequisite for showing
-   the upgrade path live.
-
-2. **The test suite does not run.** There is no `tests/conftest.py`, so all 8 tests in
+1. **The test suite does not run.** There is no `tests/conftest.py`, so all 8 tests in
    `test_companies.py` error at setup on missing fixtures (`auth_guide_token`, `db`,
-   `company_id`). Pre-existing. Phase 6 work.
+   `company_id`). Pre-existing. Phase 6 work. (`tests/test_plan_limit_wiring.py`, added with the
+   enforcement fix below, needs no fixtures and does run.)
 
-3. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
+2. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
    `ck_payment_accounts_provider` constraint predates the `demo` provider) and omits every
    `CREATE TYPE`. `bootstrap_schema.py` compensates, but the dump should be regenerated.
+
+### Plan limit enforcement — fixed
+
+Plan limits were advertised by `GET /companies/{id}/limits` and enforced on only half the paths
+that consume quota. `app/api/activities.py` imported `enforce_company_creation_limits`, took the
+`get_current_company_id` dependency, and never called it; `app/api/activity_schedules.py` never
+referenced it at all. A `basic` tenant walked from 48 to 52 schedules against a cap of 50 without
+an error.
+
+Three call sites were wired:
+
+| Path | Gate |
+| --- | --- |
+| `POST /activities` | `metric="activities"`, against the caller's company context — matches `programs.py`. |
+| `POST /activity-schedules` (standalone) | `metric="schedules_total"`, against the **selling** company. |
+| `POST /activity-schedules` (child of a program schedule) | `metric="schedules_total"`, against the parent's selling company. |
+
+Two decisions worth knowing:
+
+- **Activity schedules gate on the selling company, not the caller.** `company_usage` counts an
+  activity schedule toward the company that owns the underlying activity, so that is whose quota
+  the row consumes. Gating on the caller (as `program_schedules.py` does) would let a guest
+  company schedule a shared activity straight through the owner's cap.
+- **Child activity schedules are gated too.** `schedules_total` counts rows in both
+  `program_schedules` and `activity_schedules`, so each child consumes quota of its own. Leaving
+  this path open kept the cap trivially bypassable — create one program schedule, then attach
+  children forever. The cost is that filling a program schedule can stop partway once the cap is
+  reached; parent and children are already separate requests, so a partial build is an existing
+  failure mode rather than a new one.
+
+Verified end to end against a running server: activities block at 20/20, standalone schedules at
+50/50, child schedules at 50/50, and `pro`/`enterprise` tenants are unaffected.
+
+`tests/test_plan_limit_wiring.py` guards the regression. It parses the route modules and asserts
+the enforcer is actually called — the original bug is invisible in review, since the import is
+present and the module reads as if it enforces. The tests cover wiring, not behaviour; they
+cannot check that the right company or metric is passed. Confirmed to fail on the pre-fix code.
 
 ### Fixed in passing
 

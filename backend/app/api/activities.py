@@ -140,6 +140,12 @@ def create_activity(
     """
     Crea una nueva actividad validando location, type y asignando created_by.
     """
+    # Mirrors programs.create_program. This module imported enforce_company_creation_limits and
+    # took the company_id dependency but never called it, so max_activities was advertised by
+    # GET /companies/{id}/limits and never actually applied.
+    if company_id:
+        enforce_company_creation_limits(db, company_id, metric="activities")
+
     print(f"Received payload: {payload.dict()}")
 
     # Valida que location_id exista
