@@ -1,14 +1,18 @@
 # scripts/create_super_admin.py
 from sqlalchemy.orm import Session
-from app.db.session import get_session
+from app.db.session import get_db
 from app.models.user import User
-from app.utils.security import hash_password
+# Was `from app.utils.security import hash_password`, which is unimportable: app/utils.py
+# shadows the app/utils/ directory (which has no __init__.py), so this script raised
+# ModuleNotFoundError before it ever prompted. app.core.security is the module the login
+# endpoint verifies against, which is what a bootstrapped admin needs to match anyway.
+from app.core.security import get_password_hash as hash_password
 from datetime import datetime
 from contextlib import contextmanager
 
 @contextmanager
 def session_scope():
-    db = next(get_session())
+    db = next(get_db())
     try:
         yield db
     finally:
