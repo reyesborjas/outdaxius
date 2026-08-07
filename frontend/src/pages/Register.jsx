@@ -7,6 +7,23 @@ const preventEnterSubmit = (e) => {
   if (e.key === "Enter") e.preventDefault();
 };
 
+// Props for a wizard step, driven by one boolean.
+//
+// `inert` rather than `aria-hidden`. Clicking a step's own button (Next, or a role choice) leaves
+// that button focused while the very same render hides its section. aria-hidden on an ancestor of
+// the focused element is a violation -- the browser refuses to apply it and logs "Blocked
+// aria-hidden on an element because its descendant retained focus". aria-hidden was doing nothing
+// for us anyway: display:none already removes a subtree from the accessibility tree. `inert` is
+// what the console message itself recommends, and unlike aria-hidden it also drops focus and
+// takes the subtree out of the tab order.
+//
+// React 18 does not accept a boolean for `inert` (it warns on a non-boolean attribute), so pass
+// an empty string to set it and undefined to omit it. React 19 accepts inert={true} directly.
+const stepProps = (visible) => ({
+  style: { display: visible ? "block" : "none" },
+  inert: visible ? undefined : "",
+});
+
 export default function Register() {
   const navigate = useNavigate();
 
@@ -101,8 +118,8 @@ export default function Register() {
   // "An invalid form control with name='' is not focusable", and silently refuses to submit.
   // handleSubmit never runs and the user sees nothing happen.
   //
-  // These flags are the single source of truth for each step: they drive display, aria-hidden and
-  // `required` together, so a field can only be required while it is actually on screen.
+  // These flags are the single source of truth for each step: they drive display, inert (via
+  // stepProps) and `required` together, so a field can only be required while it is on screen.
   const isStepRole = activeStep === 0;
   const isStepBasic = activeStep === 1;
   const isStepGuideType = activeStep === 2 && role === "guide";
@@ -157,7 +174,7 @@ export default function Register() {
 
   const StepRole = useMemo(
     () => (
-      <section aria-hidden={!isStepRole} style={{ display: isStepRole ? "block" : "none" }}>
+      <section {...stepProps(isStepRole)}>
         <h3 className="mb-3">What do you want to do at Outdaxious?</h3>
         <div className="vstack gap-2">
           <button
@@ -188,7 +205,7 @@ export default function Register() {
 
   const StepBasic = useMemo(
     () => (
-      <section aria-hidden={!isStepBasic} style={{ display: isStepBasic ? "block" : "none" }}>
+      <section {...stepProps(isStepBasic)}>
         <h3 className="mb-3">Basic Information</h3>
         <div className="mb-2">
           <label className="form-label">Display Name</label>
@@ -270,7 +287,7 @@ export default function Register() {
 
   const StepGuideType = useMemo(
     () => (
-      <section aria-hidden={!isStepGuideType} style={{ display: isStepGuideType ? "block" : "none" }}>
+      <section {...stepProps(isStepGuideType)}>
         <h3 className="mb-3">Are you independent or a company?</h3>
         <div className="vstack gap-2">
           <button
@@ -306,7 +323,7 @@ export default function Register() {
 
   const StepIndependent = useMemo(
     () => (
-      <section aria-hidden={!isStepIndependent} style={{ display: isStepIndependent ? "block" : "none" }}>
+      <section {...stepProps(isStepIndependent)}>
         <h3 className="mb-3">Independent Guide</h3>
         <div className="mb-2">
           <label className="form-label">Passport Number</label>
@@ -354,7 +371,7 @@ export default function Register() {
 
   const StepCompany = useMemo(
     () => (
-      <section aria-hidden={!isStepCompany} style={{ display: isStepCompany ? "block" : "none" }}>
+      <section {...stepProps(isStepCompany)}>
         <h3 className="mb-3">Company Fiscal Information</h3>
 
         <div className="mb-2">
@@ -520,7 +537,7 @@ export default function Register() {
 
   const StepUserSubmit = useMemo(
     () => (
-      <section aria-hidden={!isStepUserSubmit} style={{ display: isStepUserSubmit ? "block" : "none" }}>
+      <section {...stepProps(isStepUserSubmit)}>
         <h3 className="mb-3">Ready to create your account</h3>
         <div className="d-flex justify-content-between">
           <button type="button" className="btn btn-secondary" onClick={back}>
