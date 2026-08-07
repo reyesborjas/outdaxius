@@ -51,7 +51,7 @@ export default function Programs() {
   useEffect(() => {
     let alive = true;
     api
-      .get(`/programs/`, { skipAuth: true })
+      .get(`/programs/${inDashboard ? "?mine_only=true" : ""}`, { skipAuth: !inDashboard })
       .then((data) => {
         if (!alive) return;
         const normal = (Array.isArray(data) ? data : []).map((p) => ({

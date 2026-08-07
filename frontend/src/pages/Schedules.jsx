@@ -24,8 +24,8 @@ export default function Schedules() {
       const [progSchedulesData, actSchedulesData, allPrograms, allActivities] = await Promise.all([
         api.get(`/program-schedules/?mine_only=true`).catch(() => []),
         api.get(`/activity-schedules/?mine_only=true`).catch(() => []),
-        api.get(`/programs/`).catch(() => []),
-        api.get(`/activities/`).catch(() => []),
+        api.get(`/programs/?mine_only=true`).catch(() => []),
+        api.get(`/activities/?mine_only=true`).catch(() => []),
       ]);
 
       // Normalize Program Schedules

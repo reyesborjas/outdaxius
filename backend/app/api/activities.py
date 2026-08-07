@@ -12,10 +12,11 @@ from app.models.activity import Activity
 from app.models.types import Types
 from app.models.user import User
 from app.schemas.activity import ActivityCreate, ActivityOut
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_optional
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
 from app.core.permissions import require_action, check_permission, check_permission_for_resource, get_user_team_membership
+from app.services.catalogue import activity_visibility_filter, can_view_activity
 
 router = APIRouter()
 
@@ -51,35 +52,57 @@ def normalize_gallery(gallery):
 # ---------- Endpoints ----------
 
 @router.get("/", response_model=List[ActivityOut])
-def list_activities(db: Session = Depends(get_db)):
+def list_activities(
+    db: Session = Depends(get_db),
+    mine_only: bool = False,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    Listar todas las actividades, incluyendo relaciones: location, type, creator.
+    Default (mine_only=false) is the public catalogue: offerings with a real bookable departure,
+    plus anything the caller has already booked. mine_only=true is the back-office view -- the
+    caller's own company's catalogue plus anything shared -- which is what the scheduling screens
+    need, since it lists exactly what check_can_reuse will let them act on.
+
+    See app.services.catalogue. This used to return every row on the platform to anyone.
     """
-    items = (
-        db.query(Activity)
-        .options(
+    if mine_only and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required for mine_only")
+
+    query = db.query(Activity).options(
             selectinload(Activity.location),
             selectinload(Activity.type),  # ✅ Cargar type
             selectinload(Activity.creator),
             selectinload(Activity.leader),
             selectinload(Activity.team),
-        )
-        .all()
     )
-    
+
+    visibility = activity_visibility_filter(db, current_user, mine_only)
+    if visibility is not None:
+        query = query.filter(visibility)
+
+    items = query.all()
+
     for a in items:
         a.gallery = normalize_gallery(a.gallery)
-    
+
     return items
 
 
 @router.get("/search", response_model=List[ActivityOut])
-def search_activities(q: str, db: Session = Depends(get_db)):
+def search_activities(
+    q: str,
+    db: Session = Depends(get_db),
+    mine_only: bool = False,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
-    Buscar actividades por título, descripción o tipo.
+    Same visibility rules as list_activities -- search must not be a way around them.
     """
-    query = f"%{q.lower()}%"
-    items = (
+    if mine_only and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required for mine_only")
+
+    pattern = f"%{q.lower()}%"
+    query = (
         db.query(Activity)
         .options(
             selectinload(Activity.location),
@@ -91,22 +114,31 @@ def search_activities(q: str, db: Session = Depends(get_db)):
         .join(Types, Activity.activity_type == Types.id)
         .filter(
             or_(
-                func.lower(Activity.title).like(query),
-                func.lower(Activity.description).like(query),
-                func.lower(Types.type_name).like(query)
+                func.lower(Activity.title).like(pattern),
+                func.lower(Activity.description).like(pattern),
+                func.lower(Types.type_name).like(pattern)
             )
         )
-        .all()
     )
-    
+
+    visibility = activity_visibility_filter(db, current_user, mine_only)
+    if visibility is not None:
+        query = query.filter(visibility)
+
+    items = query.all()
+
     for a in items:
         a.gallery = normalize_gallery(a.gallery)
-    
+
     return items
 
 
 @router.get("/{activity_id}", response_model=ActivityOut)
-def get_activity(activity_id: uuid.UUID, db: Session = Depends(get_db)):
+def get_activity(
+    activity_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     """
     Obtiene una actividad por ID, incluyendo relaciones: location, type, creator.
     """
@@ -125,7 +157,12 @@ def get_activity(activity_id: uuid.UUID, db: Session = Depends(get_db)):
     
     if not activity:
         raise HTTPException(status_code=404, detail="Activity not found")
-    
+
+    # 404 rather than 403: telling an outsider "this exists but you may not see it" leaks the
+    # existence of a competitor's private catalogue entry, which is the thing being protected.
+    if not can_view_activity(db, current_user, activity):
+        raise HTTPException(status_code=404, detail="Activity not found")
+
     activity.gallery = normalize_gallery(activity.gallery)
     return activity
 

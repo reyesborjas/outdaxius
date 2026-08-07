@@ -49,7 +49,7 @@ export default function Activities() {
   useEffect(() => {
     let alive = true;
     api
-      .get(`/activities/`, { skipAuth: !token })
+      .get(`/activities/${inDashboard ? "?mine_only=true" : ""}`, { skipAuth: !token })
       .then((rows) => {
         if (!alive) return;
         const data = (Array.isArray(rows) ? rows : []).map((a) => ({
@@ -130,7 +130,10 @@ const runSearch = async ({ query }) => {
 
   setSearching(true);
   try {
-    const arr = await api.get(`/activities/search?q=${encodeURIComponent(text)}`, { skipAuth: !token });
+    const arr = await api.get(
+      `/activities/search?q=${encodeURIComponent(text)}${inDashboard ? "&mine_only=true" : ""}`,
+      { skipAuth: !token }
+    );
     const normalized = (arr || []).map(a => ({
       ...a,
       gallery: normalizeGallery(a.gallery)

@@ -10,7 +10,7 @@ from app.models.programs import Program
 from app.models.types import Types
 from app.models.user import User
 from app.schemas.program import ProgramCreate, ProgramOut
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_optional
 from pydantic import BaseModel
 from app.schemas.activity import ActivityOut
 from app.models.activity import Activity
@@ -18,6 +18,7 @@ from app.models.programactivity import ProgramActivity
 from app.api.deps import get_current_company_id
 from app.services.enforce_limits import enforce_company_creation_limits
 from app.core.permissions import require_action, check_permission, check_permission_for_resource, check_can_reuse, get_user_team_membership
+from app.services.catalogue import program_visibility_filter, can_view_program
 
 
 router = APIRouter()
@@ -36,16 +37,29 @@ class ProgramUpdate(BaseModel):
 # ---------- Endpoints ----------
 @router.get("", response_model=List[ProgramOut])
 @router.get("/", response_model=List[ProgramOut])
-def list_programs(db: Session = Depends(get_db)):
-    items = (
-        db.query(Program)
-        .options(
-            selectinload(Program.creator),
-            selectinload(Program.type),  # cargar el type vinculado
-            selectinload(Program.team),
-        )
-        .all()
+def list_programs(
+    db: Session = Depends(get_db),
+    mine_only: bool = False,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """
+    Default is the public catalogue; mine_only=true is the back-office view. Same rules as
+    activities.list_activities -- see app.services.catalogue.
+    """
+    if mine_only and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required for mine_only")
+
+    query = db.query(Program).options(
+        selectinload(Program.creator),
+        selectinload(Program.type),  # cargar el type vinculado
+        selectinload(Program.team),
     )
+
+    visibility = program_visibility_filter(db, current_user, mine_only)
+    if visibility is not None:
+        query = query.filter(visibility)
+
+    items = query.all()
 
     # Normaliza gallery si viene como ["url1","url2",...]
     for p in items:
@@ -148,12 +162,21 @@ def delete_program(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 @router.get("/search", response_model=List[ProgramOut])
-def search_programs(q: str, db: Session = Depends(get_db)):
+def search_programs(
+    q: str,
+    db: Session = Depends(get_db),
+    mine_only: bool = False,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
+    """Same visibility rules as list_programs -- search must not be a way around them."""
+    if mine_only and current_user is None:
+        raise HTTPException(status_code=401, detail="Authentication required for mine_only")
+
     q = (q or "").strip().lower()
     if not q:
         return []
     like = f"%{q}%"
-    return (
+    query = (
         db.query(Program)
         .outerjoin(Types, Program.program_type == Types.id)
         .filter(
@@ -162,13 +185,29 @@ def search_programs(q: str, db: Session = Depends(get_db)):
                 func.lower(Types.type_name).like(like),
             )
         )
-        .all()
     )
+
+    visibility = program_visibility_filter(db, current_user, mine_only)
+    if visibility is not None:
+        query = query.filter(visibility)
+
+    return query.all()
 @router.get("/{program_id}/activities", response_model=list[ActivityOut])
-def get_program_activities(program_id: UUID, db: Session = Depends(get_db)):
+def get_program_activities(
+    program_id: UUID,
+    db: Session = Depends(get_db),
+    current_user: Optional[User] = Depends(get_current_user_optional),
+):
     program = db.query(Program).options(selectinload(Program.activities)).filter(Program.id == program_id).first()
     if not program:
         raise HTTPException(status_code=404, detail="Program not found")
+
+    # Gated on the PROGRAM, not on each activity: an activity is part of the offering, so anyone
+    # who may see the program may see what it consists of. 404 rather than 403 so this does not
+    # confirm the existence of a private program.
+    if not can_view_program(db, current_user, program):
+        raise HTTPException(status_code=404, detail="Program not found")
+
     return program.activities
 
 @router.post("/{program_id}/activities", status_code=status.HTTP_201_CREATED)

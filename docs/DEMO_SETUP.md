@@ -143,40 +143,49 @@ python -m scripts.bootstrap_schema --drop   # rebuild the schema from scratch
 
 ---
 
+## Testing
+
+`tests/conftest.py` gives the suite a real Postgres database, a `TestClient` wired to it, and
+factories for people and tenants. Each test runs inside a transaction that is rolled back
+afterwards, joined in savepoint mode so the endpoints' own `db.commit()` calls do not escape it.
+
+```bash
+cd backend
+createdb outdaxius_test          # or set TEST_DATABASE_URL
+python -m pytest tests/ -q
+```
+
+The schema is built once per run the same way a deployment builds it — `schema.sql` plus the
+Alembic migrations — deliberately **not** `Base.metadata.create_all()`, because the ORM has known
+drift from the migrated schema (`bookings.status` is a plain `String` on the model but a
+`booking_status` enum in the database). Creating tables from the models would produce a schema the
+application never actually runs against. Postgres rather than SQLite for the same reason: the
+partial unique indexes and check constraints have already caught real bugs here.
+
+`tests/test_companies.py` predated any conftest and had never run — every test errored at setup on
+missing fixtures, and it built its own module-level `TestClient` that bypassed the `get_db`
+override. It runs now. Five of its assertions were stale rather than failing: `max_guides` was
+deliberately dropped from the schema by migration `0001`, one test sent an invalid payload so
+`422` fired before the authorisation check it meant to assert, and the licence-cap test invited
+six people when the cap counts accepted members. Those were corrected against what the code
+deliberately does, not weakened to go green.
+
 ## Known issues found while building this
 
 Documented rather than silently fixed, because each is a product decision rather than seeder work.
 
-1. **The test suite does not run.** There is no `tests/conftest.py`, so all 8 tests in
-   `test_companies.py` error at setup on missing fixtures (`auth_guide_token`, `db`,
-   `company_id`). Pre-existing. Phase 6 work. (`tests/test_plan_limit_wiring.py`, added with the
-   enforcement fix below, needs no fixtures and does run.)
-
-2. **The catalogue listing is unscoped.** `GET /activities/`, `GET /activities/search`,
-   `GET /activities/{id}` and `GET /programs/` take no authentication dependency and apply no
-   filter, so they return every activity and program on the platform — including other
-   companies' private (`is_shared = false`) content — to any caller, logged in or not. Verified
-   against the seeded tenants: with no token at all, all 18 activities and 10 programs came back,
-   every one of them `is_shared = false`.
-
-   The **write** path is already correct: `check_can_reuse` returns 403 for another company's
-   non-shared resource ("This activity belongs to another company and is not marked as shared"),
-   so nobody can actually schedule what they should not. The listing is the leak, and it also
-   misleads the UI into offering actions that the API will refuse.
-
-   **Agreed target:** an unauthenticated visitor should see only offerings that have a published,
-   bookable schedule. Guides get a separate internal view scoped to their own team/company plus
-   anything `is_shared`. Note this cannot be a single filter — `SearchActivities.jsx`,
-   `SearchPrograms.jsx` and `SearchTrips.jsx` are customer-facing, so scoping the one listing to
-   team members would leave travellers with nothing to browse. `list_activity_schedules` already
-   has the right shape with its `mine_only` flag.
-
-   Not yet done. It is a live-data behaviour change and wants the DB fixture the suite still
-   lacks (see issue 1). The PII half of this was fixed — see below.
-
-3. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
+1. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
    `ck_payment_accounts_provider` constraint predates the `demo` provider) and omits every
    `CREATE TYPE`. `bootstrap_schema.py` compensates, but the dump should be regenerated.
+
+2. **A company at its guide cap can still issue invitations.** `LicenseManager.can_add_guide`
+   counts active `CompanyMember` rows, and an invitation does not create one, so a full company
+   can send invitations that are then guaranteed to fail on acceptance. Defensible as-is (an
+   invitee is not a guide until they accept) but it wastes the invitee's time.
+
+3. **`POST /companies/{id}/invitations` returns 200, not 201**, because it declares a
+   `response_model` and no `status_code`. Arguably wrong for a resource-creating POST; left alone
+   because changing it is an API contract change.
 
 ### Plan limit enforcement — fixed
 
@@ -214,6 +223,37 @@ Verified end to end against a running server: activities block at 20/20, standal
 the enforcer is actually called — the original bug is invisible in review, since the import is
 present and the module reads as if it enforces. The tests cover wiring, not behaviour; they
 cannot check that the right company or metric is passed. Confirmed to fail on the pre-fix code.
+
+### Catalogue scoping — fixed
+
+`GET /activities/`, `/activities/search`, `/activities/{id}`, `/programs/`, `/programs/search`
+and `/programs/{id}/activities` took no authentication and applied no filter, so they returned
+every row on the platform — other companies' private (`is_shared = false`) content included — to
+any caller. The write path was already correct (`check_can_reuse` returns 403), so this was a
+disclosure, and it also misled the UI into offering actions the API would then refuse.
+
+Two audiences now, because one filter cannot serve both — `SearchActivities`/`SearchPrograms`/
+`SearchTrips` are customer-facing, so scoping the single listing to team members would leave
+travellers nothing to browse:
+
+| View | Who | What they see |
+| --- | --- | --- |
+| **Public** (default) | anyone, signed in or not | Offerings with an upcoming, non-cancelled departure from a charges-enabled company. Plus, when signed in, anything they have already booked — so past trips keep resolving in "My bookings". |
+| **Internal** (`?mine_only=true`) | authenticated only, 401 otherwise | Their own company's whole catalogue plus anything `is_shared`. Deliberately mirrors `check_can_reuse`, so the list offers exactly what the write path accepts. |
+
+Platform admins bypass both. Detail endpoints return **404**, not 403, for something the caller
+may not see — 403 would confirm that a competitor's private entry exists.
+
+Rules live in `app/services/catalogue.py`. Frontend: `Activities.jsx`/`Programs.jsx` already knew
+whether they were rendering the public route or the dashboard (`inDashboard`), so that flag now
+drives `mine_only` too; `Schedules.jsx`, `CreateSchedule.jsx` and `EditProgramModal.jsx` are
+back-office only and always request the internal view. `Bookings.jsx` deliberately stays on the
+public list — the booked-by-me rule is what keeps its titles resolving.
+
+Verified by `tests/test_catalogue_scoping.py` (14 request-level tests; 9 fail without the fix),
+against the seeded tenants, and in a browser. On demo data: cancelling every departure of an
+activity drops it from the public catalogue and from an anonymous `GET` by id (404) while its
+owning company still sees and manages it.
 
 ### Catalogue PII exposure — fixed
 

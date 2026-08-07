@@ -29,8 +29,8 @@ export default function CreateSchedule() {
   // Carga base
   useEffect(() => {
     if (!token) return;
-    api.get(`/programs/`).then(setPrograms).catch(() => {});
-    api.get(`/activities/`).then(setActivities).catch(() => {});
+    api.get(`/programs/?mine_only=true`).then(setPrograms).catch(() => {});
+    api.get(`/activities/?mine_only=true`).then(setActivities).catch(() => {});
   }, [token]);
 
   // Cargar actividades ligadas al programa

@@ -78,7 +78,7 @@ export default function EditProgramModal({ program, onClose, onSaved, onDeleted 
     }
     setSearching(true);
     try {
-      const data = await api.get(`/activities/search?q=${encodeURIComponent(q)}`);
+      const data = await api.get(`/activities/search?q=${encodeURIComponent(q)}&mine_only=true`);
       setResults(data || []);
     } catch {
       setResults([]);
