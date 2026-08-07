@@ -152,7 +152,29 @@ Documented rather than silently fixed, because each is a product decision rather
    `company_id`). Pre-existing. Phase 6 work. (`tests/test_plan_limit_wiring.py`, added with the
    enforcement fix below, needs no fixtures and does run.)
 
-2. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
+2. **The catalogue listing is unscoped.** `GET /activities/`, `GET /activities/search`,
+   `GET /activities/{id}` and `GET /programs/` take no authentication dependency and apply no
+   filter, so they return every activity and program on the platform — including other
+   companies' private (`is_shared = false`) content — to any caller, logged in or not. Verified
+   against the seeded tenants: with no token at all, all 18 activities and 10 programs came back,
+   every one of them `is_shared = false`.
+
+   The **write** path is already correct: `check_can_reuse` returns 403 for another company's
+   non-shared resource ("This activity belongs to another company and is not marked as shared"),
+   so nobody can actually schedule what they should not. The listing is the leak, and it also
+   misleads the UI into offering actions that the API will refuse.
+
+   **Agreed target:** an unauthenticated visitor should see only offerings that have a published,
+   bookable schedule. Guides get a separate internal view scoped to their own team/company plus
+   anything `is_shared`. Note this cannot be a single filter — `SearchActivities.jsx`,
+   `SearchPrograms.jsx` and `SearchTrips.jsx` are customer-facing, so scoping the one listing to
+   team members would leave travellers with nothing to browse. `list_activity_schedules` already
+   has the right shape with its `mine_only` flag.
+
+   Not yet done. It is a live-data behaviour change and wants the DB fixture the suite still
+   lacks (see issue 1). The PII half of this was fixed — see below.
+
+3. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
    `ck_payment_accounts_provider` constraint predates the `demo` provider) and omits every
    `CREATE TYPE`. `bootstrap_schema.py` compensates, but the dump should be regenerated.
 
@@ -192,6 +214,34 @@ Verified end to end against a running server: activities block at 20/20, standal
 the enforcer is actually called — the original bug is invisible in review, since the import is
 present and the module reads as if it enforces. The tests cover wiring, not behaviour; they
 cannot check that the right company or metric is passed. Confirmed to fail on the pre-fix code.
+
+### Catalogue PII exposure — fixed
+
+`ActivityOut` embedded the full `UserOut` as `creator` and `leader`; `ProgramOut` did the same for
+`creator`. Those endpoints require no authentication, so every field of `UserOut` was
+world-readable: `email`, `national_id`, `passport_number`, `phone`, `birth_date`, `tax_id`, and
+the entire `fiscal_data` blob (legal representative name and ID, tax address, economic activity).
+
+An unauthenticated request returned, for each of 18 activities, the creator's and lead guide's
+full records — enough to enumerate every operator on the platform and harvest their staff's
+personal and tax data. `GET /users/{id}` is properly locked down (authenticated, admin-or-self),
+so this embedded object was the only route to it.
+
+Fixed by adding `UserPublicOut` (id, display_name, first_name, last_name, role, profile_picture)
+and using it for `creator`/`leader` in both catalogue schemas. That keeps what a listing
+legitimately renders — who to credit, and an avatar — and drops everything that identifies a
+person off-platform. `UserOut` is unchanged where it belongs: `/users/me`, `/users/{id}` and the
+auth responses still return the caller's own full record.
+
+Verified unauthenticated against the seeded data: creator objects now carry only
+`display_name`, `first_name`, `last_name`, `id`, `role`, `profile_picture`. Verified in the
+browser that the activities list still renders its "By &lt;name&gt;" credit and that owner
+edit/delete still resolves — the frontend's ownership check reads `creator.id`, with
+`creator.email` only ever a redundant fallback.
+
+`tests/test_catalogue_pii.py` guards it by walking the resolved Pydantic models, so it also
+catches the field reappearing through a newly nested model. Confirmed to fail when `UserOut` is
+put back.
 
 ### Fixed in passing
 

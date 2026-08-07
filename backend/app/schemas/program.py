@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from uuid import UUID
 import uuid
 from app.schemas.types import TypesOut
-from app.schemas.user import UserOut
+from app.schemas.user import UserPublicOut
 from typing import Optional, List
 
 class ProgramOut(BaseModel):
@@ -15,7 +15,8 @@ class ProgramOut(BaseModel):
     program_type: UUID
     type: TypesOut
     is_shared: bool = False
-    creator: Optional[UserOut] = None
+    # UserPublicOut, never UserOut: this endpoint is unauthenticated (see UserPublicOut).
+    creator: Optional[UserPublicOut] = None
     team_id: Optional[UUID] = None
     company_id: Optional[UUID] = None
 

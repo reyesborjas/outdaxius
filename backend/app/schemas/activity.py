@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field, ConfigDict
 from app.schemas.types import TypesOut
 
 from app.schemas.location import LocationOut, LocationResolveIn
-from app.schemas.user import UserOut  # quita esta línea si tu respuesta no expone "creator"
+from app.schemas.user import UserPublicOut
 
 class ActivityBase(BaseModel):
     title: str
@@ -31,8 +31,9 @@ class ActivityOut(BaseModel):
     type: Optional[TypesOut] = None
     location: Optional[LocationOut] = None
     gallery: List[Dict] = Field(default_factory=list)
-    creator: Optional[UserOut] = None
-    leader: Optional[UserOut] = None
+    # UserPublicOut, never UserOut: this endpoint is unauthenticated (see UserPublicOut).
+    creator: Optional[UserPublicOut] = None
+    leader: Optional[UserPublicOut] = None
     guide_leader: Optional[UUID] = None
     team_id: Optional[UUID] = None
     company_id: Optional[UUID] = None
