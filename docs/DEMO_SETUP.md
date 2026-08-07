@@ -49,13 +49,22 @@ python -m scripts.bootstrap_schema
 > `0001_mvp_foundation` immediately runs `ALTER TABLE users ...` and fails with
 > `relation "users" does not exist`. The table definitions live in `schema.sql` at the repo root.
 >
-> `schema.sql` cannot be piped into `psql` either: it was produced by reflecting the live database
-> through SQLAlchemy, which does not emit `CREATE TYPE`, so the five enums the tables depend on
-> are missing; and its statements come out in reflection order rather than dependency order.
->
-> `bootstrap_schema.py` handles both — it creates the enums, applies the schema to a fixed point,
-> stamps the revision `schema.sql` corresponds to (`0005_team_is_active`), then upgrades to head.
-> Use `--drop` to wipe and rebuild.
+> `bootstrap_schema.py` applies `schema.sql`, stamps the revision that file records in its
+> header, then runs `alembic upgrade head` for anything newer. Use `--drop` to wipe and rebuild.
+
+`schema.sql` is a `pg_dump --schema-only`, so it is also directly restorable if you prefer:
+
+```bash
+psql outdaxius_demo -f ../schema.sql     # then: alembic stamp <revision in its header>
+```
+
+**Regenerate it whenever a migration lands**, or new environments come up on a schema nobody is
+running:
+
+```bash
+python -m scripts.dump_schema --from-scratch   # build a pristine DB from the migrations, dump it
+python -m scripts.dump_schema --check          # CI: fail if the dump has drifted
+```
 
 ## 5. Seed the demo
 
@@ -139,6 +148,8 @@ python -m scripts.seed_demo --purge         # purge and stop
 python -m scripts.seed_demo --customers 150 # bigger booking population
 python -m scripts.verify_demo               # assert the demo is showable
 python -m scripts.bootstrap_schema --drop   # rebuild the schema from scratch
+python -m scripts.dump_schema --from-scratch # regenerate schema.sql after a migration
+python -m scripts.dump_schema --check        # CI: fail if schema.sql has drifted
 ```
 
 ---
@@ -174,13 +185,47 @@ deliberately does, not weakened to go green.
 
 Documented rather than silently fixed, because each is a product decision rather than seeder work.
 
-1. **`schema.sql` is stale and incomplete.** It reflects revision `0005` (its
-   `ck_payment_accounts_provider` constraint predates the `demo` provider) and omits every
-   `CREATE TYPE`. `bootstrap_schema.py` compensates, but the dump should be regenerated.
-
-2. **`POST /companies/{id}/invitations` returns 200, not 201**, because it declares a
+1. **`POST /companies/{id}/invitations` returns 200, not 201**, because it declares a
    `response_model` and no `status_code`. Arguably wrong for a resource-creating POST; left alone
    because changing it is an API contract change.
+
+### schema.sql — regenerated, and now reproducible
+
+The dump had drifted badly. It sat at revision `0005`, so its
+`ck_payment_accounts_provider` constraint predated the `demo` payment provider; it contained no
+`CREATE TYPE` at all, so the five enums the tables depend on were simply absent; and its
+statements came out in SQLAlchemy reflection order rather than dependency order. It could not
+build a database, which is the one job it has.
+
+The cause was in its own header: it had been produced by reflecting a live database because
+`pg_dump` was unavailable on the machine that made it. `pg_dump` is a normal dependency of a
+Postgres install, so `scripts/dump_schema.py` now drives it and records the Alembic revision in
+the header, and `bootstrap_schema.py` reads that revision rather than hardcoding one — so
+regenerating after a new migration cannot silently leave the bootstrap stamping the wrong
+revision and skipping migrations.
+
+Three fixes were needed to make a `pg_dump` genuinely reusable here:
+
+- **`\restrict` / `\unrestrict` are stripped.** pg_dump 16.13+ wraps its output in these, but
+  they are psql *meta-commands* — anything talking to Postgres directly chokes on them. They also
+  carry a fresh random nonce per run, which alone would make the file differ on every
+  regeneration and break `--check`.
+- **`CREATE SCHEMA public` is made conditional.** Postgres creates `public` with the database, so
+  the bare form aborts a restore into exactly the empty database this file exists to serve.
+- **Extensions are included.** Passing `--schema=public` makes pg_dump skip `CREATE EXTENSION`,
+  and the column defaults call `public.uuid_generate_v4()`, so the restore died on the first
+  table.
+
+One subtlety worth knowing if you apply the dump programmatically: pg_dump's preamble sets an
+empty session `search_path` so a restore can only touch fully-qualified names. Every connection
+that applied the dump keeps that setting, and the ORM emits unqualified table names — so a reused
+pooled connection fails with `relation "users" does not exist` while the table is sitting right
+there. `bootstrap_schema.py` and the test fixtures both dispose the pool afterwards.
+
+Verified four ways: `psql -f schema.sql` into an empty database (25 tables, 5 enums, no errors),
+`bootstrap_schema` → seed → `verify_demo`, the test suite (which builds its schema from this
+file), and `dump_schema --check`, which confirms a dump built purely from the migrations is
+byte-identical to the committed file.
 
 ### Guide cap — fixed
 

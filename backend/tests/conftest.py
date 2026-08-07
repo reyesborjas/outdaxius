@@ -68,11 +68,9 @@ from app.models.user import User  # noqa: E402
 from app.core.crypto import encrypt_credentials  # noqa: E402
 
 from scripts.bootstrap_schema import (  # noqa: E402
-    ENUMS,
     SCHEMA_SQL,
-    SCHEMA_SQL_REVISION,
     apply_until_fixed_point,
-    create_enums,
+    schema_revision,
     split_statements,
 )
 
@@ -121,13 +119,22 @@ def engine():
         conn.execute(text("CREATE SCHEMA public"))
         conn.execute(text('CREATE EXTENSION IF NOT EXISTS "uuid-ossp"'))
         conn.execute(text('CREATE EXTENSION IF NOT EXISTS "pgcrypto"'))
-        create_enums(conn)
 
-    apply_until_fixed_point(eng, split_statements(SCHEMA_SQL.read_text(encoding="utf-8")))
+    sql = SCHEMA_SQL.read_text(encoding="utf-8")
+    apply_until_fixed_point(eng, split_statements(sql))
+
+    # schema.sql is a pg_dump, and pg_dump opens with
+    # SELECT pg_catalog.set_config('search_path', '', false) -- session-level, deliberately, so a
+    # restore can only touch fully-qualified names. Every connection that applied the dump is
+    # still carrying that empty search_path, and the ORM emits unqualified table names, so
+    # reusing one of those pooled connections fails with `relation "users" does not exist` even
+    # though the table is right there. Throw the pool away; fresh connections get the server
+    # default back.
+    eng.dispose()
 
     env = {**os.environ, "DATABASE_URL": TEST_DATABASE_URL}
     subprocess.run(
-        [sys.executable, "-m", "alembic", "stamp", SCHEMA_SQL_REVISION],
+        [sys.executable, "-m", "alembic", "stamp", schema_revision(sql)],
         cwd=BACKEND_DIR, env=env, check=True, capture_output=True,
     )
     subprocess.run(
