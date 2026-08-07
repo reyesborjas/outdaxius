@@ -1,0 +1,15 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "Outdaxius (local)",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "outdaxius",
+      "Username": "appuser",
+      "PassFile": "/tmp/pgpass",
+      "SSLMode": "prefer",
+      "Comment": "Postgres container from docker-compose.yml. 'Host' is the compose service name, not localhost -- pgAdmin connects over the compose network, not through the published port."
+    }
+  }
+}

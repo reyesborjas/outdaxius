@@ -1,0 +1,69 @@
+# Local Postgres + pgAdmin for Outdaxius development.
+#
+#   docker compose up -d          start both
+#   docker compose down           stop, keeping the data
+#   docker compose down -v        stop and wipe the database volume
+#
+# pgAdmin lands on http://localhost:5050 with the "Outdaxius (local)" server already
+# registered and its password already filled in. See docs/PGADMIN_SETUP.md.
+#
+# The credentials below deliberately match backend/.env.example, so the default
+# DATABASE_URL works untouched:
+#   postgresql+psycopg2://appuser:appsecret@localhost:5432/outdaxius
+# They are development-only values for a container bound to localhost. Do not reuse them
+# anywhere that is reachable from outside your machine.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: outdaxius-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: appsecret
+      POSTGRES_DB: outdaxius
+    ports:
+      # Override with POSTGRES_HOST_PORT=5433 if you already have Postgres on 5432.
+      # Remember to change the port in backend/.env to match.
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      # Runs once, only when the volume is empty.
+      - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U appuser -d outdaxius"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: outdaxius-pgadmin
+    restart: unless-stopped
+    environment:
+      PGADMIN_DEFAULT_EMAIL: dev@outdaxius.local
+      PGADMIN_DEFAULT_PASSWORD: pgadmin
+      # Desktop mode: no pgAdmin login screen, no master password prompt.
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+      PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+    ports:
+      - "${PGADMIN_HOST_PORT:-5050}:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
+    # servers.json cannot carry a password, only a path to a libpq password file, and that
+    # file must be mode 0600 -- which a bind mount from Windows or macOS cannot guarantee.
+    # So write it inside the container instead, then hand over to the image's own entrypoint.
+    # If a future image drops /entrypoint.sh, delete these two lines: the only consequence is
+    # that pgAdmin asks for the password ("appsecret") the first time you open the server.
+    entrypoint:
+      - /bin/sh
+      - -c
+      - 'printf "postgres:5432:*:appuser:appsecret\n" > /tmp/pgpass && chmod 600 /tmp/pgpass && exec /entrypoint.sh'
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  pgadmin_data:
