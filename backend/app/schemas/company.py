@@ -72,9 +72,19 @@ class CompanyWithMembers(CompanyOut):
 
 class LicenseInfo(BaseModel):
     tier: str
-    max_guides: int
+    # Optional because the enterprise tier is unlimited (LicenseManager.TIER_MAX_GUIDES maps it to
+    # None). Declared as a plain int, this endpoint raised a validation error for every
+    # enterprise company -- the response model could not represent "no limit" at all.
+    max_guides: Optional[int] = None
     current_guides: int
+    # An outstanding invitation reserves a seat, so seats_taken is what the caller should show as
+    # "used" -- current_guides alone understates it and the next invitation looks free when it
+    # is not. can_add_guides answers "can one more person join?", can_invite_guides answers
+    # "can one more invitation be sent?"; they differ by exactly the reserved seats.
+    pending_invitations: int = 0
+    seats_taken: int = 0
     can_add_guides: bool
+    can_invite_guides: bool = True
     expires_at: Optional[datetime] = None
 
 class CancellationRateOut(BaseModel):

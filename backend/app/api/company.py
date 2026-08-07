@@ -19,7 +19,7 @@ from app.schemas.invitation import (
 )
 from app.api.deps import get_current_user
 from app.core.permissions import check_company_admin, check_team_or_company_admin
-from app.services.licensing import LicenseManager
+from app.services.licensing import LicenseManager, LicenseLimitError
 from app.services.invitations import InvitationManager
 from pydantic import BaseModel
 from datetime import datetime
@@ -327,10 +327,15 @@ def accept_invitation(
             "company_id": str(member.companyid),
             "position": member.position
         }
+    except LicenseLimitError as e:
+        # 402, not 400: the invitation and the request are both perfectly valid -- the company is
+        # out of seats. Ordered before the ValueError arm because LicenseLimitError subclasses it.
+        db.rollback()
+        raise HTTPException(status_code=status.HTTP_402_PAYMENT_REQUIRED, detail=str(e))
     except ValueError as e:
         db.rollback()
         raise HTTPException(status_code=400, detail=str(e))
-    
+
 @router.get("/{company_id}/invitations", response_model=List[InvitationListOut])
 def list_invitations(
     company_id: UUID,

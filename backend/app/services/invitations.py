@@ -156,7 +156,22 @@ class InvitationManager:
             CompanyMember.companyid == invitation.company_id,
             CompanyMember.userid == user_id
         ).first()
-        
+
+        # 4b. The seat check, and the authoritative one. Validating only when the invitation was
+        # issued left the cap bypassable outright: a company under its limit could issue any
+        # number of invitations and every one of them would be accepted. Deliberately placed
+        # after the existing-membership lookup, so reactivating a lapsed member is measured
+        # against the seat they are about to reoccupy, and skipped for an already-active member
+        # (that path raises "Already a member" below and consumes no seat).
+        #
+        # Raises LicenseLimitError, which the endpoint maps to 402. The invitation is left
+        # untouched -- still pending, still unused -- so the company can upgrade its plan or free
+        # a seat and the same code will then work.
+        if not (existing and existing.is_active):
+            from app.services.licensing import LicenseManager
+
+            LicenseManager.validate_can_add_member(db, invitation.company_id)
+
         if existing:
             if existing.is_active:
                 raise ValueError("Already a member")

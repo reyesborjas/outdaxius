@@ -146,6 +146,12 @@ def db(engine):
     join_transaction_mode="create_savepoint" is what makes this work against endpoints that call
     db.commit(): those commits release a savepoint rather than committing the outer transaction,
     so the rollback below still undoes everything the test did.
+
+    One consequence worth knowing when writing a test: if the endpoint under test calls
+    db.rollback() on its error path -- most of them do -- that unwinds to the current savepoint
+    and takes the test's own setup with it. Call db.commit() after arranging the fixture data
+    (not db.flush()) so the setup is released into the outer transaction first and survives.
+    tests/test_guide_cap.py does exactly this.
     """
     connection = engine.connect()
     transaction = connection.begin()

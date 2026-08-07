@@ -178,14 +178,43 @@ Documented rather than silently fixed, because each is a product decision rather
    `ck_payment_accounts_provider` constraint predates the `demo` provider) and omits every
    `CREATE TYPE`. `bootstrap_schema.py` compensates, but the dump should be regenerated.
 
-2. **A company at its guide cap can still issue invitations.** `LicenseManager.can_add_guide`
-   counts active `CompanyMember` rows, and an invitation does not create one, so a full company
-   can send invitations that are then guaranteed to fail on acceptance. Defensible as-is (an
-   invitee is not a guide until they accept) but it wastes the invitee's time.
-
-3. **`POST /companies/{id}/invitations` returns 200, not 201**, because it declares a
+2. **`POST /companies/{id}/invitations` returns 200, not 201**, because it declares a
    `response_model` and no `status_code`. Arguably wrong for a resource-creating POST; left alone
    because changing it is an API contract change.
+
+### Guide cap — fixed
+
+Documented earlier as "a company at its cap can still issue invitations that will fail on
+acceptance". That understated it: **`accept_invitation` never checked the cap at all.** Only
+invitation *creation* validated the licence, so a company under its limit could issue any number
+of invitations and every one would be accepted. Reproduced against a free-tier company with one
+seat left: four invitees accepted, four `200`s, eight members against a cap of five. The cap was
+bypassable, not merely leaky.
+
+Two changes:
+
+- **Acceptance is now the authoritative check.** `InvitationManager.accept_invitation` calls
+  `LicenseManager.validate_can_add_member` before creating the membership. A refusal is `402`,
+  not `400` — the request is valid, the company is out of seats — and it leaves the invitation
+  `pending` and unused, so the company can upgrade and the same code still works. The check is
+  skipped when reactivating an already-active member, which consumes no seat.
+- **Outstanding invitations reserve a seat.** `get_company_license_info` now reports
+  `pending_invitations`, `seats_taken`, and a `can_invite_guides` distinct from `can_add_guides`:
+  issuing an invitation counts members *plus* reservations, while accepting one counts members
+  only (the invitation being accepted is still pending and would otherwise count against
+  itself). Expired invitations release their seat, so an unanswered invite cannot hold one
+  forever.
+
+`LicenseLimitError` subclasses `ValueError`, so existing handlers keep working while the endpoint
+can distinguish "out of seats" from "bad request".
+
+Also fixed in passing: **`GET /companies/{id}/license` was broken for every enterprise company.**
+`LicenseInfo.max_guides` was declared `int`, but the unlimited tier maps to `None`, so the
+response failed validation. It is `Optional[int]` now. Cordillera Ski School, the demo's
+enterprise tenant, hit this on every request.
+
+Covered by `tests/test_guide_cap.py` (9 tests), which reproduces the original bypass before
+asserting the fix.
 
 ### Plan limit enforcement — fixed
 
