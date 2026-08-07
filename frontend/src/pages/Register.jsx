@@ -94,6 +94,22 @@ export default function Register() {
   const next = () => setActiveStep((s) => s + 1);
   const back = () => setActiveStep((s) => Math.max(0, s - 1));
 
+  // Every step lives inside one <form> and is hidden with display:none rather than unmounted, so
+  // a hidden step's inputs are STILL part of the form's constraint-validation set. A `required`
+  // input inside a hidden section makes the form permanently invalid: on submit the browser tries
+  // to focus it to show the validation bubble, cannot (it has no layout box), logs
+  // "An invalid form control with name='' is not focusable", and silently refuses to submit.
+  // handleSubmit never runs and the user sees nothing happen.
+  //
+  // These flags are the single source of truth for each step: they drive display, aria-hidden and
+  // `required` together, so a field can only be required while it is actually on screen.
+  const isStepRole = activeStep === 0;
+  const isStepBasic = activeStep === 1;
+  const isStepGuideType = activeStep === 2 && role === "guide";
+  const isStepIndependent = activeStep === 3 && guideType === "independent";
+  const isStepCompany = activeStep === 3 && guideType === "company";
+  const isStepUserSubmit = activeStep === 2 && role === "user";
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError("");
@@ -141,7 +157,7 @@ export default function Register() {
 
   const StepRole = useMemo(
     () => (
-      <section aria-hidden={activeStep !== 0} style={{ display: activeStep === 0 ? "block" : "none" }}>
+      <section aria-hidden={!isStepRole} style={{ display: isStepRole ? "block" : "none" }}>
         <h3 className="mb-3">What do you want to do at Outdaxious?</h3>
         <div className="vstack gap-2">
           <button
@@ -167,12 +183,12 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, role]
+    [isStepRole, role]
   );
 
   const StepBasic = useMemo(
     () => (
-      <section aria-hidden={activeStep !== 1} style={{ display: activeStep === 1 ? "block" : "none" }}>
+      <section aria-hidden={!isStepBasic} style={{ display: isStepBasic ? "block" : "none" }}>
         <h3 className="mb-3">Basic Information</h3>
         <div className="mb-2">
           <label className="form-label">Display Name</label>
@@ -183,7 +199,7 @@ export default function Register() {
             value={form.display_name}
             onKeyDown={preventEnterSubmit}
             onChange={(e) => setField("display_name", e.target.value)}
-            required
+            required={isStepBasic}
           />
         </div>
         <div className="row g-2">
@@ -218,7 +234,7 @@ export default function Register() {
             value={form.email}
             onKeyDown={preventEnterSubmit}
             onChange={(e) => setField("email", e.target.value)}
-            required
+            required={isStepBasic}
           />
         </div>
         <div className="mb-2">
@@ -231,7 +247,7 @@ export default function Register() {
             value={form.password}
             onKeyDown={preventEnterSubmit}
             onChange={(e) => setField("password", e.target.value)}
-            required
+            required={isStepBasic}
           />
         </div>
         <div className="d-flex justify-content-between mt-3">
@@ -249,12 +265,12 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, form, setField]
+    [isStepBasic, form, setField]
   );
 
   const StepGuideType = useMemo(
     () => (
-      <section aria-hidden={!(activeStep === 2 && role === "guide")} style={{ display: activeStep === 2 && role === "guide" ? "block" : "none" }}>
+      <section aria-hidden={!isStepGuideType} style={{ display: isStepGuideType ? "block" : "none" }}>
         <h3 className="mb-3">Are you independent or a company?</h3>
         <div className="vstack gap-2">
           <button
@@ -285,12 +301,12 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, role, guideType]
+    [isStepGuideType, guideType]
   );
 
   const StepIndependent = useMemo(
     () => (
-      <section aria-hidden={!(activeStep === 3 && guideType === "independent")} style={{ display: activeStep === 3 && guideType === "independent" ? "block" : "none" }}>
+      <section aria-hidden={!isStepIndependent} style={{ display: isStepIndependent ? "block" : "none" }}>
         <h3 className="mb-3">Independent Guide</h3>
         <div className="mb-2">
           <label className="form-label">Passport Number</label>
@@ -333,35 +349,37 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, guideType, form, setField]
+    [isStepIndependent, form, setField]
   );
 
   const StepCompany = useMemo(
     () => (
-      <section aria-hidden={!(activeStep === 3 && guideType === "company")} style={{ display: activeStep === 3 && guideType === "company" ? "block" : "none" }}>
+      <section aria-hidden={!isStepCompany} style={{ display: isStepCompany ? "block" : "none" }}>
         <h3 className="mb-3">Company Fiscal Information</h3>
 
         <div className="mb-2">
           <label className="form-label">Tax ID *</label>
           <input
+            name="tax_id"
             className="form-control"
             value={form.tax_id}
             onKeyDown={preventEnterSubmit}
             onChange={(e) => setField("tax_id", e.target.value)}
-            required
+            required={isStepCompany}
           />
         </div>
 
         <div className="mb-2">
           <label className="form-label">Primary Identification Number *</label>
           <input
+            name="primary_identification_number"
             className="form-control"
             value={form.fiscal_data.tax_identification.primary_identification_number}
             onKeyDown={preventEnterSubmit}
             onChange={(e) =>
               setFiscal(["tax_identification", "primary_identification_number"], e.target.value)
             }
-            required
+            required={isStepCompany}
           />
         </div>
 
@@ -497,12 +515,12 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, guideType, form, setFiscal, setField]
+    [isStepCompany, form, setFiscal, setField]
   );
 
   const StepUserSubmit = useMemo(
     () => (
-      <section aria-hidden={!(activeStep === 2 && role === "user")} style={{ display: activeStep === 2 && role === "user" ? "block" : "none" }}>
+      <section aria-hidden={!isStepUserSubmit} style={{ display: isStepUserSubmit ? "block" : "none" }}>
         <h3 className="mb-3">Ready to create your account</h3>
         <div className="d-flex justify-content-between">
           <button type="button" className="btn btn-secondary" onClick={back}>
@@ -514,7 +532,7 @@ export default function Register() {
         </div>
       </section>
     ),
-    [activeStep, role]
+    [isStepUserSubmit]
   );
 
   return (
